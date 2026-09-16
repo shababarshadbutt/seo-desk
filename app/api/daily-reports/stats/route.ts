@@ -1,6 +1,6 @@
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { connectDB, DailyReport, Backlink, IndexingQueue, WeeklyReport, Group } from "@/lib/mongodb";
+import { connectDB, DailyReport, Backlink, IndexingQueue, WeeklyReport, Group, User } from "@/lib/mongodb";
 
 export const dynamic = "force-dynamic";
 
@@ -25,15 +25,16 @@ function weekStartFor(dateStr: string): string {
   return monday.toLocaleDateString("en-CA", { timeZone: PKT });
 }
 
-// GET /api/daily-reports/stats?date=YYYY-MM-DD — 4 real, read-only stat-card
+// GET /api/daily-reports/stats?date=YYYY-MM-DD — real, read-only stat-card
 // numbers for the Daily Reports screen, each scoped by the same role-visibility
 // rule as /api/daily-reports itself (admin=own, sub-lead=own+group, super-admin=all).
-// gscBingDispatched is the one exception: IndexingQueue has no per-user
-// attribution at all (it's tied to websiteId, and the whole feature is
-// super-admin-only elsewhere in the app), so it is only meaningful — and only
-// returned — for a super-admin viewer; other roles get `null` and the client
-// omits that card rather than showing a misleading org-wide number next to
-// otherwise personal/team stats.
+//
+// Part D addition: `gscBingDispatched`/`verifiedDomainsHandled` are shown to
+// every role now (org-wide, not scoped) — per the pixel-fidelity redesign
+// decision, this is a "team activity preview" number, not sensitive, and
+// Stitch's mock shows it unconditionally. `activeSpecialists`/`totalSpecialists`/
+// `submissionRate`/`avgBacklinksPerMember` are new, all real, all scoped like
+// the rest of this route.
 export async function GET(req: Request) {
   const session = await getServerSession(authOptions);
   if (!session) return Response.json({ error: "Unauthorized" }, { status: 401 });
@@ -56,30 +57,52 @@ export async function GET(req: Request) {
 
   const { start, end } = dayRange(date);
   const userScope = scopedUserIds !== null ? { userId: { $in: scopedUserIds } } : {};
+  const userFilter = scopedUserIds !== null ? { _id: { $in: scopedUserIds } } : {};
 
-  const [submittedToday, liveBacklinksPlaced, rfqAgg] = await Promise.all([
+  const [
+    submittedToday,
+    liveBacklinksPlaced,
+    rfqAgg,
+    totalSpecialists,
+    distinctSubmitters,
+    gscBingDispatched,
+    verifiedDomainIds,
+  ] = await Promise.all([
     DailyReport.countDocuments({ ...userScope, date: { $gte: start, $lte: end } }),
     Backlink.countDocuments({ ...userScope, status: "live", createdAt: { $gte: start, $lte: end } }),
     WeeklyReport.aggregate([
       { $match: { ...userScope, weekStart: weekStartFor(date) } },
       { $group: { _id: null, total: { $sum: "$rfqs" } } },
     ]),
-  ]);
-
-  let gscBingDispatched: number | null = null;
-  if (role === "super-admin") {
-    gscBingDispatched = await IndexingQueue.countDocuments({
+    User.countDocuments({ ...userFilter, isActive: true }),
+    DailyReport.distinct("userId", { ...userScope, date: { $gte: start, $lte: end } }),
+    IndexingQueue.countDocuments({
       $or: [
         { gscStatus: "submitted", gscSubmittedAt: { $gte: start, $lte: end } },
         { bingStatus: "submitted", bingSubmittedAt: { $gte: start, $lte: end } },
       ],
-    });
-  }
+    }),
+    IndexingQueue.distinct("websiteId", {
+      $or: [
+        { gscStatus: "submitted", gscSubmittedAt: { $gte: start, $lte: end } },
+        { bingStatus: "submitted", bingSubmittedAt: { $gte: start, $lte: end } },
+      ],
+    }),
+  ]);
+
+  const activeSpecialists = distinctSubmitters.length;
+  const submissionRate = totalSpecialists > 0 ? Math.round((activeSpecialists / totalSpecialists) * 100) : 0;
+  const avgBacklinksPerMember = totalSpecialists > 0 ? Math.round((liveBacklinksPlaced / totalSpecialists) * 10) / 10 : 0;
 
   return Response.json({
     submittedToday,
     liveBacklinksPlaced,
     gscBingDispatched,
     rfqsGenerated: rfqAgg[0]?.total ?? 0,
+    activeSpecialists,
+    totalSpecialists,
+    submissionRate,
+    avgBacklinksPerMember,
+    verifiedDomainsHandled: verifiedDomainIds.length,
   });
 }

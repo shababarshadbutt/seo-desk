@@ -8,7 +8,7 @@ function applyTheme(theme: "light" | "dark") {
   localStorage.setItem("theme", theme);
 }
 
-export function ThemeToggle({ className }: { className?: string }) {
+export function ThemeToggle({ className, showLabel }: { className?: string; showLabel?: boolean }) {
   const [theme, setTheme] = useState<"light" | "dark" | null>(null);
 
   useEffect(() => {
@@ -16,7 +16,7 @@ export function ThemeToggle({ className }: { className?: string }) {
   }, []);
 
   if (theme === null) {
-    return <div className={className} style={{ width: "2.25rem", height: "2.25rem" }} />;
+    return <div className={className} style={{ width: showLabel ? "5.5rem" : "2.25rem", height: "2.25rem" }} />;
   }
 
   function toggle() {
@@ -33,10 +33,13 @@ export function ThemeToggle({ className }: { className?: string }) {
       onClick={toggle}
       className={
         className ??
-        "inline-flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-card text-muted-foreground shadow-sm transition-colors hover:text-foreground"
+        (showLabel
+          ? "inline-flex items-center gap-1.5 h-9 px-3 rounded-lg border border-border bg-card text-sm font-medium text-foreground shadow-sm transition-colors hover:bg-muted"
+          : "inline-flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-card text-muted-foreground shadow-sm transition-colors hover:text-foreground")
       }
     >
       {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+      {showLabel && (theme === "dark" ? "Light" : "Dark")}
     </button>
   );
 }

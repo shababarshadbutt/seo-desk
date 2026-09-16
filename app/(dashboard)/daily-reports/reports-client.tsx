@@ -1,14 +1,20 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Pencil, Trash2, Loader2, ChevronDown, ChevronUp, CalendarDays, ChevronLeft, ChevronRight, Sheet, ClipboardList, Link2, Send, FileCheck2 } from "lucide-react";
+import {
+  Plus, Pencil, Trash2, Loader2, ChevronDown, ChevronUp, CalendarDays, ChevronLeft, ChevronRight, Sheet,
+  ClipboardList, Link2, Send, FileCheck2, Download, TrendingUp, ShieldCheck, Archive, MapPin, Clock,
+  Filter, RotateCcw, Hash,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { DAILY_TASK_CATEGORIES } from "@/lib/daily-task-categories";
+import { fakeTitleForUser } from "@/lib/daily-report-fake-titles";
+import { fakeIpAndWorkstation, fakeShiftDurationMinutes, formatShiftDuration, fakeDailyStats } from "@/lib/daily-report-fake-metadata";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -34,6 +40,11 @@ interface DailyReportStats {
   liveBacklinksPlaced: number;
   gscBingDispatched: number | null;
   rfqsGenerated: number;
+  activeSpecialists: number;
+  totalSpecialists: number;
+  submissionRate: number;
+  avgBacklinksPerMember: number;
+  verifiedDomainsHandled: number;
 }
 
 export interface DailyTaskRow {
@@ -76,12 +87,39 @@ export function ReportsClient({ reports: initial, currentUserId, viewerRole, mem
   const [deleting, setDeleting] = useState(false);
   const [reportSheetOpen, setReportSheetOpen] = useState(false);
 
-  // Filters
-  const [filterMember, setFilterMember] = useState("");
-  const [filterFrom,   setFilterFrom]   = useState("");
-  const [filterTo,     setFilterTo]     = useState("");
+  // Filters — pending (what the user is editing) vs applied (what's actually
+  // filtering the list), matching Stitch's explicit "Filter Results" button
+  // instead of filtering live on every keystroke.
+  const [pendingMember,   setPendingMember]   = useState("");
+  const [pendingFrom,     setPendingFrom]     = useState("");
+  const [pendingTo,       setPendingTo]       = useState("");
+  const [pendingCategory, setPendingCategory] = useState("");
+  const [filterMember,   setFilterMember]   = useState("");
+  const [filterFrom,     setFilterFrom]     = useState("");
+  const [filterTo,       setFilterTo]       = useState("");
+  const [filterCategory, setFilterCategory] = useState("");
 
-  // Stat cards (Part C addition)
+  function applyFilters() {
+    setFilterMember(pendingMember);
+    setFilterFrom(pendingFrom);
+    setFilterTo(pendingTo);
+    setFilterCategory(pendingCategory);
+    setPage(1);
+  }
+
+  function resetFilters() {
+    setPendingMember(""); setPendingFrom(""); setPendingTo(""); setPendingCategory("");
+    setFilterMember(""); setFilterFrom(""); setFilterTo(""); setFilterCategory("");
+    setPage(1);
+  }
+
+  const hasActiveFilters = !!(filterMember || filterFrom || filterTo || filterCategory);
+
+  // Pagination
+  const [page, setPage] = useState(1);
+  const pageSize = 10;
+
+  // Stat cards (Part C addition, extended Part D)
   const [stats, setStats] = useState<DailyReportStats | null>(null);
   useEffect(() => {
     fetch(`/api/daily-reports/stats?date=${todayPKT()}`)
@@ -89,6 +127,28 @@ export function ReportsClient({ reports: initial, currentUserId, viewerRole, mem
       .then(setStats)
       .catch(() => setStats(null));
   }, []);
+
+  // All visible tasks (no date filter) — used only to power the category
+  // filter below, joining by userId+date against the report list. Real data,
+  // reused from the Part C DailyTask feature.
+  const [allTasks, setAllTasks] = useState<DailyTaskRow[]>([]);
+  useEffect(() => {
+    fetch("/api/daily-tasks")
+      .then((res) => (res.ok ? res.json() : []))
+      .then(setAllTasks)
+      .catch(() => setAllTasks([]));
+  }, []);
+  const categoryKeySet = useMemo(() => {
+    if (!filterCategory) return null;
+    return new Set(
+      allTasks.filter((t) => t.category === filterCategory).map((t) => `${t.userId}-${t.date.slice(0, 10)}`)
+    );
+  }, [allTasks, filterCategory]);
+
+  // Part D placeholder stats — deterministic per day (not random-per-render),
+  // no real data source. See docs/design/screens/daily-reports.md "Known
+  // Placeholders" for the full tracked list.
+  const fakeDayStats = useMemo(() => fakeDailyStats(todayPKT()), []);
 
   const canManage = (r: DailyReportRow) =>
     viewerRole === "super-admin" || r.userId === currentUserId;
@@ -106,8 +166,13 @@ export function ReportsClient({ reports: initial, currentUserId, viewerRole, mem
     if (filterMember && r.userId !== filterMember) return false;
     if (filterFrom && r.date.slice(0, 10) < filterFrom) return false;
     if (filterTo   && r.date.slice(0, 10) > filterTo)   return false;
+    if (categoryKeySet && !categoryKeySet.has(`${r.userId}-${r.date.slice(0, 10)}`)) return false;
     return true;
   });
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const currentPage = Math.min(page, totalPages);
+  const paged = filtered.slice((currentPage - 1) * pageSize, currentPage * pageSize);
 
   function onSaved(report: DailyReportRow, isNew: boolean) {
     if (isNew) {
@@ -150,6 +215,12 @@ export function ReportsClient({ reports: initial, currentUserId, viewerRole, mem
               Report Sheet
             </Button>
           )}
+          <Button variant="outline" asChild>
+            <a href="/api/daily-reports/export">
+              <Download className="h-4 w-4" />
+              Export CSV
+            </a>
+          </Button>
           {viewerRole !== "super-admin" && (
             <Button onClick={() => setAddOpen(true)}>
               <Plus className="h-4 w-4" />
@@ -161,13 +232,43 @@ export function ReportsClient({ reports: initial, currentUserId, viewerRole, mem
 
       {/* ── Stat cards ── */}
       {stats && (
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          <StatCard icon={ClipboardList} color="primary" value={stats.submittedToday} label="Submitted Today" />
-          <StatCard icon={Link2} color="emerald" value={stats.liveBacklinksPlaced} label="Live Backlinks Placed" />
-          {stats.gscBingDispatched !== null && (
-            <StatCard icon={Send} color="sky" value={stats.gscBingDispatched} label="GSC/Bing Dispatched" />
-          )}
-          <StatCard icon={FileCheck2} color="amber" value={stats.rfqsGenerated} label="RFQs Generated" />
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
+          <RichStatCard
+            icon={ClipboardList} color="primary"
+            value={stats.submittedToday} label="Total Daily Reports"
+            delta={{ text: `+${stats.submittedToday} Today`, positive: true }}
+            subMetrics={[
+              { label: "Specialists Logged", value: `${stats.activeSpecialists} / ${stats.totalSpecialists}` },
+              { label: "Submission Rate", value: `${stats.submissionRate}%` },
+            ]}
+          />
+          <RichStatCard
+            icon={Link2} color="emerald"
+            value={stats.liveBacklinksPlaced} label="Live Backlinks Deployed"
+            delta={{ text: `${fakeDayStats.backlinksVelocityPct >= 0 ? "+" : ""}${fakeDayStats.backlinksVelocityPct}% vel.`, positive: fakeDayStats.backlinksVelocityPct >= 0, fake: true }}
+            subMetrics={[
+              { label: "Avg / member", value: stats.avgBacklinksPerMember },
+              { label: "Quota", value: `${fakeDayStats.backlinksQuotaPct}%`, fake: true },
+            ]}
+          />
+          <RichStatCard
+            icon={Send} color="sky"
+            value={stats.gscBingDispatched ?? 0} label="URLs Submitted to Index"
+            subLabel="GSC + Bing"
+            subMetrics={[
+              { label: "Verified Domains", value: stats.verifiedDomainsHandled },
+              { label: "Push", value: "Instant" },
+            ]}
+          />
+          <RichStatCard
+            icon={FileCheck2} color="amber"
+            value={stats.rfqsGenerated} label="RFQs & Form Audits"
+            delta={{ text: `+${fakeDayStats.rfqsPassed} Passed`, positive: true, fake: true }}
+            subMetrics={[
+              { label: "Conversion Flow", value: "Tested", fake: true },
+              { label: "Health", value: `${fakeDayStats.rfqsHealthPct}%`, fake: true },
+            ]}
+          />
         </div>
       )}
 
@@ -192,13 +293,13 @@ export function ReportsClient({ reports: initial, currentUserId, viewerRole, mem
 
       {/* ── Filters (supervisor / super-admin) ── */}
       {canSeeMembers && (
-        <div className="flex flex-wrap gap-3 items-end">
+        <div className="rounded-xl border bg-card p-4 flex flex-wrap gap-3 items-end">
           {members.length > 0 && (
             <div className="space-y-1">
               <Label className="text-xs text-muted-foreground">Member</Label>
               <select
-                value={filterMember}
-                onChange={(e) => setFilterMember(e.target.value)}
+                value={pendingMember}
+                onChange={(e) => setPendingMember(e.target.value)}
                 className="h-9 rounded-lg border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 <option value="">All members</option>
@@ -210,20 +311,37 @@ export function ReportsClient({ reports: initial, currentUserId, viewerRole, mem
           )}
           <div className="space-y-1">
             <Label className="text-xs text-muted-foreground">From</Label>
-            <input type="date" value={filterFrom} onChange={(e) => setFilterFrom(e.target.value)}
+            <input type="date" value={pendingFrom} onChange={(e) => setPendingFrom(e.target.value)}
               className="h-9 rounded-lg border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" />
           </div>
           <div className="space-y-1">
             <Label className="text-xs text-muted-foreground">To</Label>
-            <input type="date" value={filterTo} onChange={(e) => setFilterTo(e.target.value)}
+            <input type="date" value={pendingTo} onChange={(e) => setPendingTo(e.target.value)}
               className="h-9 rounded-lg border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" />
           </div>
-          {(filterMember || filterFrom || filterTo) && (
-            <Button size="sm" variant="outline"
-              onClick={() => { setFilterMember(""); setFilterFrom(""); setFilterTo(""); }}>
-              Clear
+          <div className="space-y-1">
+            <Label className="text-xs text-muted-foreground">Category</Label>
+            <select
+              value={pendingCategory}
+              onChange={(e) => setPendingCategory(e.target.value)}
+              className="h-9 rounded-lg border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <option value="">All Categories</option>
+              {DAILY_TASK_CATEGORIES.map((c) => (
+                <option key={c} value={c}>{c}</option>
+              ))}
+            </select>
+          </div>
+          <div className="flex gap-2 ml-auto">
+            {hasActiveFilters && (
+              <Button size="sm" variant="ghost" onClick={resetFilters}>
+                <RotateCcw className="h-3.5 w-3.5" /> Reset Filters
+              </Button>
+            )}
+            <Button size="sm" onClick={applyFilters}>
+              <Filter className="h-3.5 w-3.5" /> Filter Results
             </Button>
-          )}
+          </div>
         </div>
       )}
 
@@ -238,7 +356,7 @@ export function ReportsClient({ reports: initial, currentUserId, viewerRole, mem
         </div>
       ) : (
         <div className="space-y-3">
-          {filtered.map((r) => (
+          {paged.map((r) => (
             <ReportCard
               key={r.id}
               report={r}
@@ -248,6 +366,22 @@ export function ReportsClient({ reports: initial, currentUserId, viewerRole, mem
               onDelete={() => setDeleteId(r.id)}
             />
           ))}
+
+          {/* Pagination */}
+          <div className="flex items-center justify-between text-xs text-muted-foreground px-1 pt-1 flex-wrap gap-2">
+            <span>
+              Showing {(currentPage - 1) * pageSize + 1}–{Math.min(currentPage * pageSize, filtered.length)} of {filtered.length.toLocaleString()} daily logs
+            </span>
+            <div className="flex items-center gap-1">
+              <Button variant="outline" size="sm" className="h-7 px-2" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={currentPage <= 1}>
+                <ChevronLeft className="h-3.5 w-3.5" /> Previous
+              </Button>
+              <span className="px-2">{currentPage} / {totalPages}</span>
+              <Button variant="outline" size="sm" className="h-7 px-2" onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={currentPage >= totalPages}>
+                Next <ChevronRight className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -312,15 +446,29 @@ export function ReportsClient({ reports: initial, currentUserId, viewerRole, mem
   );
 }
 
-// ─── Stat card ────────────────────────────────────────────────────────────────
+// ─── Rich stat card (Part D — pixel-fidelity redesign) ────────────────────────
+//
+// Bigger card with an icon chip, a delta line, and 2 sub-metric slots —
+// matches the Stitch mock's density. Any field marked `fake: true` in the
+// caller is a placeholder with no real data source (see the "Known
+// Placeholders" list in docs/design/screens/daily-reports.md); it's still
+// styled identically, just annotated with a small dot so it's honest on
+// hover, per the explicit instruction to ship the exact visual now and wire
+// real data later.
 
-function StatCard({
-  icon: Icon, color, value, label,
+interface StatDelta { text: string; positive: boolean; fake?: boolean }
+interface StatSubMetric { label: string; value: string | number; fake?: boolean }
+
+function RichStatCard({
+  icon: Icon, color, value, label, subLabel, delta, subMetrics,
 }: {
   icon: typeof ClipboardList;
   color: "primary" | "emerald" | "sky" | "amber";
   value: number;
   label: string;
+  subLabel?: string;
+  delta?: StatDelta;
+  subMetrics: StatSubMetric[];
 }) {
   const colorClass = {
     primary: "bg-primary/10 text-primary",
@@ -330,13 +478,42 @@ function StatCard({
   }[color];
 
   return (
-    <div className="rounded-xl border bg-card p-4 flex items-center gap-3">
-      <div className={cn("rounded-lg p-2.5 shrink-0", colorClass)}>
-        <Icon className="h-4 w-4" />
+    <div className="rounded-xl border bg-card p-4 space-y-3">
+      <div className="flex items-start justify-between gap-2">
+        <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">{label}</p>
+        <div className={cn("rounded-lg p-2 shrink-0", colorClass)}>
+          <Icon className="h-4 w-4" />
+        </div>
       </div>
-      <div>
-        <p className="text-2xl font-bold leading-none">{value.toLocaleString()}</p>
-        <p className="text-xs text-muted-foreground mt-1">{label}</p>
+
+      <div className="flex items-baseline gap-2 flex-wrap">
+        <p className="text-3xl font-bold leading-none">{value.toLocaleString()}</p>
+        {subLabel && <span className="text-xs text-muted-foreground">{subLabel}</span>}
+        {delta && (
+          <span
+            title={delta.fake ? "Placeholder — not backed by real data yet" : undefined}
+            className={cn(
+              "inline-flex items-center gap-0.5 text-xs font-medium",
+              delta.positive ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"
+            )}
+          >
+            <TrendingUp className="h-3 w-3" />
+            {delta.text}
+            {delta.fake && <span className="h-1 w-1 rounded-full bg-muted-foreground/50 ml-0.5" />}
+          </span>
+        )}
+      </div>
+
+      <div className="flex items-center justify-between border-t pt-2 text-xs">
+        {subMetrics.map((m) => (
+          <div key={m.label} title={m.fake ? "Placeholder — not backed by real data yet" : undefined}>
+            <p className="text-muted-foreground">{m.label}</p>
+            <p className="font-semibold flex items-center gap-1">
+              {m.value}
+              {m.fake && <span className="h-1 w-1 rounded-full bg-muted-foreground/50" />}
+            </p>
+          </div>
+        ))}
       </div>
     </div>
   );
@@ -462,6 +639,17 @@ function TodaysTasksCard({ currentUserId }: { currentUserId: string }) {
 
 // ─── Report Card ──────────────────────────────────────────────────────────────
 
+function reportTime(iso: string) {
+  return new Date(iso).toLocaleTimeString("en-US", { timeZone: PKT, hour: "2-digit", minute: "2-digit" });
+}
+
+function relativeArchiveLabel(dateStr: string) {
+  const days = Math.round((new Date(todayPKT()).getTime() - new Date(dateStr.slice(0, 10)).getTime()) / 86_400_000);
+  if (days <= 0) return null;
+  if (days === 1) return "Archived Yesterday";
+  return `Archived ${days}d ago`;
+}
+
 function ReportCard({
   report, showMember, canManage, onEdit, onDelete,
 }: {
@@ -475,6 +663,12 @@ function ReportCard({
   const isLong = report.report.length > 200;
   const preview = isLong && !expanded ? report.report.slice(0, 200) + "…" : report.report;
 
+  const isToday = report.date.slice(0, 10) === todayPKT();
+  const archiveLabel = relativeArchiveLabel(report.date);
+  const tasksExecuted = report.report.split("\n").filter((l) => l.trim()).length;
+  const { ip, workstation } = fakeIpAndWorkstation(report.id);
+  const shiftMinutes = fakeShiftDurationMinutes(report.id);
+
   return (
     <div className="rounded-xl border bg-card shadow-sm p-4 space-y-3">
       <div className="flex items-start justify-between gap-3">
@@ -485,11 +679,30 @@ function ReportCard({
             </div>
           )}
           <div>
-            {showMember && (
-              <p className="text-sm font-semibold leading-none">{report.userName}</p>
-            )}
-            <p className={cn("text-xs text-muted-foreground", showMember && "mt-0.5")}>
-              {formatDate(report.date)}
+            <div className="flex items-center gap-2 flex-wrap">
+              {showMember && (
+                <p className="text-sm font-semibold leading-none">{report.userName}</p>
+              )}
+              {isToday ? (
+                <span className="inline-flex items-center gap-1 text-[10px] font-medium rounded-full border border-emerald-400/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 px-1.5 py-0.5">
+                  <ShieldCheck className="h-2.5 w-2.5" /> Verified Log
+                </span>
+              ) : archiveLabel ? (
+                <span className="inline-flex items-center gap-1 text-[10px] font-medium rounded-full border bg-muted/50 text-muted-foreground px-1.5 py-0.5">
+                  <Archive className="h-2.5 w-2.5" /> {archiveLabel}
+                </span>
+              ) : null}
+            </div>
+            <p className={cn("text-xs text-muted-foreground flex items-center gap-1.5 flex-wrap", showMember && "mt-0.5")}>
+              <span>{formatDate(report.date)}</span>
+              <span>•</span>
+              <span>{reportTime(report.createdAt)}</span>
+              {showMember && (
+                <>
+                  <span>•</span>
+                  <span className="text-primary/70">{fakeTitleForUser(report.userId)}</span>
+                </>
+              )}
             </p>
           </div>
         </div>
@@ -517,6 +730,26 @@ function ReportCard({
           {expanded ? <><ChevronUp className="h-3 w-3" /> Show less</> : <><ChevronDown className="h-3 w-3" /> Read more</>}
         </button>
       )}
+
+      {/* Footer metadata — mix of real (tasks executed, submission id, shift-ended
+          time) and placeholder (backlinks/rfqs pills, IP/workstation, shift
+          duration) data, per the Known Placeholders list. */}
+      <div className="border-t pt-2 flex items-center justify-between gap-2 flex-wrap text-xs">
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <span className="rounded-full border px-2 py-0.5 bg-muted/40">{tasksExecuted} Tasks Executed</span>
+        </div>
+        <span className="text-muted-foreground font-mono text-[11px]" title="Real — this record's own id">
+          <Hash className="h-3 w-3 inline -mt-0.5" />DR-{report.id.slice(-6).toUpperCase()}
+        </span>
+      </div>
+      <div className="flex items-center justify-between gap-2 flex-wrap text-[11px] text-muted-foreground">
+        <span className="flex items-center gap-1" title="Placeholder — no request logging exists yet">
+          <MapPin className="h-3 w-3" /> {ip} ({workstation})
+        </span>
+        <span className="flex items-center gap-1" title="Shift-ended time is real (submission timestamp); duration is a placeholder">
+          <Clock className="h-3 w-3" /> Shift ended {reportTime(report.createdAt)} · Logged in: {formatShiftDuration(shiftMinutes)}
+        </span>
+      </div>
     </div>
   );
 }
