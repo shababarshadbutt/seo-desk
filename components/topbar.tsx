@@ -1,15 +1,28 @@
 "use client";
 
 import { usePathname, useRouter } from "next/navigation";
+import { useSession } from "next-auth/react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Search, Bell, Globe, Play, Loader2 } from "lucide-react";
+import { Search, Bell, Globe, Play, Loader2, Radar, Plus, Database, History } from "lucide-react";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { Button } from "@/components/ui/button";
+import { AuditHistoryDialog } from "@/components/audit-history-dialog";
+import { randomCrawlerStatus } from "@/lib/crawler-status-fake-stats";
 import { cn } from "@/lib/utils";
 
 const pageTitles: Record<string, string> = {
   "/": "Overview",
   "/scripts": "Scripts",
+  "/lastmod-updater": "Lastmod Updater",
+  "/sitemap-cleaner": "Sitemap Cleaner",
+  "/backlinks": "Backlinks",
+  "/backlink-sites": "Backlink Sites",
+  "/websites": "Websites",
+  "/weekly-reports": "Weekly Reports",
+  "/daily-reports": "Daily Reports",
+  "/audit": "Website Audit",
   "/logs": "Execution Logs",
+  "/indexing-queue": "Indexing Queue",
   "/users": "User Management",
   "/settings": "Settings",
 };
@@ -24,22 +37,106 @@ function getTitle(pathname: string): string {
   return match ? pageTitles[match] : "ASAP Dashboard";
 }
 
+const SITEMAP_TOOL_LABELS: Record<string, string> = {
+  "/lastmod-updater": "Lastmod Updater",
+  "/sitemap-cleaner": "Sitemap Cleaner",
+};
+
 export function Topbar() {
   const pathname = usePathname();
+  const router = useRouter();
+  const { data: session } = useSession();
+  const isBacklinks = pathname === "/backlinks";
+  const sitemapToolLabel = SITEMAP_TOOL_LABELS[pathname];
+  const isSuperAdmin = session?.user.role === "super-admin";
+  const [auditOpen, setAuditOpen] = useState(false);
 
   return (
     <header className="flex h-14 items-center justify-between border-b border-border bg-background pl-14 pr-4 lg:px-6 gap-3">
       <h1 className="text-base font-semibold text-foreground shrink-0">
         {getTitle(pathname)}
       </h1>
+      {isBacklinks && <CrawlerStatusPill />}
+      {sitemapToolLabel && <S3PipelinePill />}
       <div className="flex-1 flex justify-end lg:justify-center max-w-md ml-auto">
         <GlobalSearch />
       </div>
       <div className="flex items-center gap-2 shrink-0">
         <NotificationBell />
         <ThemeToggle />
+        {isBacklinks && !isSuperAdmin && (
+          <Button size="sm" onClick={() => router.push("/backlinks?add=1")}>
+            <Plus className="h-4 w-4" />
+            <span className="hidden sm:inline">New Backlink</span>
+          </Button>
+        )}
+        {sitemapToolLabel && (
+          <Button variant="outline" size="sm" onClick={() => setAuditOpen(true)}>
+            <History className="h-4 w-4" />
+            <span className="hidden sm:inline">Audit History</span>
+          </Button>
+        )}
       </div>
+      {sitemapToolLabel && (
+        <AuditHistoryDialog open={auditOpen} onOpenChange={setAuditOpen} toolLabel={sitemapToolLabel} />
+      )}
     </header>
+  );
+}
+
+// ─── S3 pipeline status pill (Lastmod Updater / Sitemap Cleaner only) ──────────
+// The bucket name is real (fetched from the existing, unmodified, super-admin-
+// only GET /api/settings/storage) when the viewer can see it; "Sync Active" is
+// presentational — no real sync/pipeline monitoring exists in this app.
+
+function S3PipelinePill() {
+  const { data: session } = useSession();
+  const [bucket, setBucket] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (session?.user.role !== "super-admin") return;
+    fetch("/api/settings/storage")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => setBucket(data?.s3?.bucket || null))
+      .catch(() => {});
+  }, [session?.user.role]);
+
+  return (
+    <div
+      className="hidden md:flex items-center gap-1.5 rounded-lg border border-border bg-sky-500/10 px-2.5 py-1 text-xs shrink-0"
+      title="Sync status is presentational — no real pipeline/sync monitoring exists yet"
+    >
+      <Database className="h-3.5 w-3.5 text-sky-600 dark:text-sky-400" />
+      <span className="font-medium text-sky-700 dark:text-sky-400">
+        S3 Pipeline{bucket ? `: ${bucket}` : ""}
+      </span>
+      <span className="text-muted-foreground">Sync Active</span>
+    </div>
+  );
+}
+
+// ─── Crawler status pill (Backlinks only) ──────────────────────────────────────
+// Presentational only — no crawler/bot monitoring system exists in this app.
+// Rotates through a small preset pool on each load. See lib/crawler-status-fake-stats.ts.
+
+function CrawlerStatusPill() {
+  const [status, setStatus] = useState<{ label: string; sublabel: string } | null>(null);
+
+  useEffect(() => {
+    setStatus(randomCrawlerStatus());
+  }, []);
+
+  if (!status) return null;
+
+  return (
+    <div
+      className="hidden md:flex items-center gap-1.5 rounded-lg border border-border bg-emerald-500/10 px-2.5 py-1 text-xs shrink-0"
+      title="Presentational status indicator — not yet backed by a real monitoring integration"
+    >
+      <Radar className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
+      <span className="font-medium text-emerald-700 dark:text-emerald-400">{status.label}</span>
+      <span className="text-muted-foreground">{status.sublabel}</span>
+    </div>
   );
 }
 

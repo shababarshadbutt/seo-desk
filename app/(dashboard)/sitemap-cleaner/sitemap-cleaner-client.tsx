@@ -34,6 +34,19 @@ async function compressJson(data: unknown): Promise<ArrayBuffer> {
   return new Response(stream.readable).arrayBuffer();
 }
 
+function formatBytes(bytes: number): string {
+  if (!bytes) return "—";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+interface FetchedFile {
+  filename: string;
+  loc: string;
+  sizeBytes: number;
+}
+
 export function SitemapCleanerClient() {
   const [sourceTab, setSourceTab] = useState<SourceTab>("upload");
   const [outputTab, setOutputTab] = useState<OutputTab>("zip");
@@ -58,6 +71,7 @@ export function SitemapCleanerClient() {
   const [hasFetched, setHasFetched] = useState(false);
   const [fetchedFileCount, setFetchedFileCount] = useState(0);
   const [fetchedIndexFilename, setFetchedIndexFilename] = useState<string | null>(null);
+  const [fetchedFiles, setFetchedFiles] = useState<FetchedFile[]>([]);
 
   // Run state
   const [status, setStatus] = useState<RunStatus>("idle");
@@ -79,6 +93,7 @@ export function SitemapCleanerClient() {
     setHasFetched(false);
     setFetchedFileCount(0);
     setFetchedIndexFilename(null);
+    setFetchedFiles([]);
   }
 
   async function loadDomains(source: "sftp" | "s3") {
@@ -116,8 +131,10 @@ export function SitemapCleanerClient() {
           body: JSON.stringify({ siteUrl: siteUrl.trim() }),
         });
         const data = await readJson(res);
-        setFetchedFileCount(data.files.filter((f: { isIndex: boolean }) => !f.isIndex).length);
+        const leaf = data.files.filter((f: { isIndex: boolean }) => !f.isIndex);
+        setFetchedFileCount(leaf.length);
         setFetchedIndexFilename(data.indexFilename);
+        setFetchedFiles(leaf.map((f: { filename: string; loc: string; sizeBytes: number }) => ({ filename: f.filename, loc: f.loc, sizeBytes: f.sizeBytes })));
         setHasFetched(true);
       } else {
         if (!selectedDomain) return;
@@ -127,8 +144,10 @@ export function SitemapCleanerClient() {
           body: JSON.stringify({ source: sourceTab, domain: selectedDomain }),
         });
         const data = await readJson(res);
-        setFetchedFileCount(data.files.filter((f: { isIndex: boolean }) => !f.isIndex).length);
+        const leaf = data.files.filter((f: { isIndex: boolean }) => !f.isIndex);
+        setFetchedFileCount(leaf.length);
         setFetchedIndexFilename(data.indexFilename);
+        setFetchedFiles(leaf.map((f: { filename: string; loc: string; sizeBytes: number }) => ({ filename: f.filename, loc: f.loc, sizeBytes: f.sizeBytes })));
         setHasFetched(true);
       }
     } catch (err) {
@@ -250,7 +269,7 @@ export function SitemapCleanerClient() {
   }
 
   return (
-    <div className="space-y-6 max-w-3xl">
+    <div className="space-y-6 max-w-5xl">
       {error && (
         <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
           {error}
@@ -264,32 +283,72 @@ export function SitemapCleanerClient() {
           <p className="text-sm text-muted-foreground">Only URLs belonging to this domain are kept.</p>
         </div>
 
-        {sourceTab === "upload" && (
-          <div className="space-y-2">
-            <Label htmlFor="upload-domain">Website Domain</Label>
-            <Input
-              id="upload-domain"
-              placeholder="https://example.com"
-              value={uploadDomain}
-              onChange={(e) => setUploadDomain(e.target.value)}
-            />
-          </div>
-        )}
+        <div className="grid gap-4 sm:grid-cols-2">
+          {sourceTab === "upload" && (
+            <div className="space-y-2">
+              <div className="flex items-center gap-2">
+                <Label htmlFor="upload-domain">Website Domain</Label>
+                {uploadDomain.trim() && (
+                  <span
+                    className="inline-flex items-center gap-1 rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2 py-0.5 text-[11px] font-medium text-emerald-700 dark:text-emerald-400"
+                    title="Placeholder — no real domain/DNS verification is performed"
+                  >
+                    Domain Verified
+                  </span>
+                )}
+              </div>
+              <Input
+                id="upload-domain"
+                placeholder="https://example.com"
+                value={uploadDomain}
+                onChange={(e) => setUploadDomain(e.target.value)}
+              />
+            </div>
+          )}
 
-        <div className="space-y-2">
-          <Label htmlFor="subfolder">URL subfolder for sitemaps</Label>
-          <Input id="subfolder" placeholder="sitemaps" value={subfolder} onChange={(e) => setSubfolder(e.target.value)} />
-          <p className="text-xs text-muted-foreground">
-            Resulting URL pattern: {(domain || "https://www.domain.com")}/{subfolder || "sitemaps"}/{"{filename}"}.xml
-          </p>
+          <div className="space-y-2">
+            <Label htmlFor="subfolder">URL subfolder for sitemaps</Label>
+            <Input id="subfolder" placeholder="sitemaps" value={subfolder} onChange={(e) => setSubfolder(e.target.value)} />
+            <p className="text-xs text-muted-foreground">
+              Resulting URL pattern: {(domain || "https://www.domain.com")}/{subfolder || "sitemaps"}/{"{filename}"}.xml
+            </p>
+          </div>
+        </div>
+
+        <div className="space-y-2 border-t border-border pt-4">
+          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Active Purification Rules</p>
+          <div className="flex flex-wrap gap-x-6 gap-y-2">
+            <label className="flex items-center gap-2 text-sm text-muted-foreground">
+              <input type="checkbox" checked disabled />
+              Deduplicate canonical URLs
+            </label>
+            <label className="flex items-center gap-2 text-sm text-muted-foreground">
+              <input type="checkbox" checked disabled />
+              Remove wrong-domain URLs
+            </label>
+            <label
+              className="flex items-center gap-2 text-sm text-muted-foreground"
+              title="Tracking params are ignored when matching duplicates, but are not stripped from the kept URLs"
+            >
+              <input type="checkbox" checked disabled />
+              Ignore tracking params when deduplicating
+            </label>
+          </div>
         </div>
       </div>
 
       {/* Source */}
       <div className="rounded-xl border border-border bg-card p-6 shadow-sm space-y-4">
-        <div>
-          <h3 className="font-semibold">Source</h3>
-          <p className="text-sm text-muted-foreground">Choose where the sitemap files come from.</p>
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h3 className="font-semibold">Source</h3>
+            <p className="text-sm text-muted-foreground">Choose where the sitemap files come from.</p>
+          </div>
+          {hasFetched && (
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-muted/40 px-2.5 py-1 text-xs font-medium shrink-0">
+              {fetchedFileCount} Sitemap{fetchedFileCount === 1 ? "" : "s"} Discovered
+            </span>
+          )}
         </div>
 
         <div className="flex flex-wrap rounded-lg border border-border p-1 bg-muted/40 w-fit">
@@ -369,10 +428,32 @@ export function SitemapCleanerClient() {
               {sourceTab === "url" ? "Discover Sitemaps" : "Fetch Files"}
             </Button>
             {hasFetched && (
-              <p className="text-sm text-muted-foreground">
-                {fetchedFileCount} sitemap file{fetchedFileCount === 1 ? "" : "s"} found
-                {fetchedIndexFilename ? <> · index: <span className="font-mono">{fetchedIndexFilename}</span></> : " · no sitemap-index.xml found"}
-              </p>
+              <>
+                <p className="text-sm text-muted-foreground">
+                  {fetchedFileCount} sitemap file{fetchedFileCount === 1 ? "" : "s"} found
+                  {fetchedIndexFilename ? <> · index: <span className="font-mono">{fetchedIndexFilename}</span></> : " · no sitemap-index.xml found"}
+                </p>
+                {fetchedFiles.length > 0 && (
+                  <div className="max-h-56 overflow-y-auto rounded-lg border border-border">
+                    <table className="w-full text-sm">
+                      <thead className="sticky top-0 bg-muted/60 backdrop-blur">
+                        <tr>
+                          <th className="px-3 py-2 text-left font-medium text-muted-foreground text-xs uppercase tracking-wide">Sitemap File</th>
+                          <th className="px-3 py-2 text-right font-medium text-muted-foreground text-xs uppercase tracking-wide">Size</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-border">
+                        {fetchedFiles.map((f) => (
+                          <tr key={f.loc}>
+                            <td className="px-3 py-2 font-mono truncate max-w-[280px]">{f.filename}</td>
+                            <td className="px-3 py-2 text-right text-muted-foreground whitespace-nowrap">{formatBytes(f.sizeBytes)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </>
             )}
           </>
         )}

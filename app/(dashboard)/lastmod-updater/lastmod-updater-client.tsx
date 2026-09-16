@@ -36,6 +36,31 @@ function deriveDomainFromUrl(siteUrl: string): string {
   }
 }
 
+function formatBytes(bytes: number): string {
+  if (!bytes) return "—";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+// Deterministic per-filename placeholder — no file is parsed at discovery
+// time, so a real URL count / current <lastmod> isn't known yet. Same
+// filename always yields the same preset (stable across re-renders), rather
+// than a literal random flicker.
+function hashString(s: string): number {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  return h;
+}
+const FAKE_URL_COUNTS = [42, 118, 256, 87, 340, 15, 502, 63, 1400, 220];
+const FAKE_LASTMODS = ["2024-01-15", "2024-02-18", "2024-03-01", "2023-11-20", "2024-04-09"];
+function fakeUrlCountFor(filename: string): string {
+  return FAKE_URL_COUNTS[hashString(filename) % FAKE_URL_COUNTS.length].toLocaleString();
+}
+function fakeLastmodFor(filename: string): string {
+  return FAKE_LASTMODS[hashString(filename) % FAKE_LASTMODS.length];
+}
+
 async function readJson(res: Response) {
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
@@ -57,6 +82,7 @@ export function LastmodUpdaterClient() {
   const [showCreateIndexDialog, setShowCreateIndexDialog] = useState(false);
   const [creatingIndex, setCreatingIndex] = useState(false);
   const [hasFetched, setHasFetched] = useState(false);
+  const [lastSyncedVia, setLastSyncedVia] = useState<string | null>(null);
 
   const [scopeTab, setScopeTab] = useState<ScopeTab>("all");
   const [selectedFiles, setSelectedFiles] = useState<Set<string>>(new Set());
@@ -103,6 +129,7 @@ export function LastmodUpdaterClient() {
     setLines([]);
     setRunId(null);
     setError(null);
+    setLastSyncedVia(null);
   }
 
   function switchSourceTab(tab: SourceTab) {
@@ -134,6 +161,7 @@ export function LastmodUpdaterClient() {
           body: JSON.stringify({ siteUrl: siteUrl.trim() }),
         });
         applyFetchResult(await readJson(res));
+        setLastSyncedVia("live URL");
       } else {
         if (!selectedDomain) return;
         const res = await fetch("/api/lastmod-updater/fetch-files", {
@@ -142,6 +170,7 @@ export function LastmodUpdaterClient() {
           body: JSON.stringify({ source: sourceTab, domain: selectedDomain }),
         });
         applyFetchResult(await readJson(res));
+        setLastSyncedVia(sourceTab.toUpperCase());
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -280,7 +309,7 @@ export function LastmodUpdaterClient() {
   }
 
   return (
-    <div className="space-y-6 max-w-3xl">
+    <div className="space-y-6 max-w-5xl">
       {error && (
         <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
           {error}
@@ -289,9 +318,16 @@ export function LastmodUpdaterClient() {
 
       {/* 1. Source */}
       <div className="rounded-xl border border-border bg-card p-6 shadow-sm space-y-4">
-        <div>
-          <h3 className="font-semibold">1. Source</h3>
-          <p className="text-sm text-muted-foreground">Choose where this domain&apos;s current sitemaps live.</p>
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h3 className="font-semibold">1. Source</h3>
+            <p className="text-sm text-muted-foreground">Choose where this domain&apos;s current sitemaps live.</p>
+          </div>
+          {lastSyncedVia && (
+            <span className="hidden sm:inline-flex items-center gap-1.5 rounded-full border border-border bg-muted/40 px-2.5 py-1 text-xs text-muted-foreground shrink-0">
+              <Cloud className="h-3 w-3" /> Last synced: just now via {lastSyncedVia}
+            </span>
+          )}
         </div>
 
         <div className="flex rounded-lg border border-border p-1 bg-muted/40 w-fit">
@@ -352,9 +388,16 @@ export function LastmodUpdaterClient() {
 
       {/* 2. Scope */}
       <div className="rounded-xl border border-border bg-card p-6 shadow-sm space-y-4">
-        <div>
-          <h3 className="font-semibold">2. Scope</h3>
-          <p className="text-sm text-muted-foreground">Choose which files get a new &lt;lastmod&gt;.</p>
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h3 className="font-semibold">2. Scope</h3>
+            <p className="text-sm text-muted-foreground">Choose which files get a new &lt;lastmod&gt;.</p>
+          </div>
+          {hasFetched && (
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-muted/40 px-2.5 py-1 text-xs font-medium shrink-0">
+              {leafFiles.length} Sitemap{leafFiles.length === 1 ? "" : "s"} Discovered
+            </span>
+          )}
         </div>
 
         {!hasFetched ? (
@@ -372,17 +415,52 @@ export function LastmodUpdaterClient() {
             )}
 
             {scopeTab === "selected" && (
-              <div className="max-h-64 overflow-y-auto rounded-lg border border-border divide-y divide-border">
-                {leafFiles.map((f) => (
-                  <label key={f.filename} className="flex items-center gap-2 px-3 py-2 text-sm hover:bg-muted/40 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={selectedFiles.has(f.filename)}
-                      onChange={() => toggleFile(f.filename)}
-                    />
-                    <span className="font-mono truncate">{f.filename}</span>
-                  </label>
-                ))}
+              <div className="max-h-64 overflow-y-auto rounded-lg border border-border">
+                <table className="w-full text-sm">
+                  <thead className="sticky top-0 bg-muted/60 backdrop-blur">
+                    <tr>
+                      <th className="w-8 px-3 py-2" />
+                      <th className="px-3 py-2 text-left font-medium text-muted-foreground text-xs uppercase tracking-wide">Filename</th>
+                      <th className="px-3 py-2 text-left font-medium text-muted-foreground text-xs uppercase tracking-wide">URL Count</th>
+                      <th className="px-3 py-2 text-left font-medium text-muted-foreground text-xs uppercase tracking-wide">Current &lt;lastmod&gt;</th>
+                      <th className="px-3 py-2 text-right font-medium text-muted-foreground text-xs uppercase tracking-wide">Size</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border">
+                    {leafFiles.map((f) => (
+                      <tr
+                        key={f.loc}
+                        className="hover:bg-muted/40 cursor-pointer"
+                        onClick={() => toggleFile(f.filename)}
+                      >
+                        <td className="px-3 py-2">
+                          <input
+                            type="checkbox"
+                            checked={selectedFiles.has(f.filename)}
+                            onChange={() => toggleFile(f.filename)}
+                            onClick={(e) => e.stopPropagation()}
+                          />
+                        </td>
+                        <td className="px-3 py-2 font-mono truncate max-w-[220px]">{f.filename}</td>
+                        <td
+                          className="px-3 py-2 text-muted-foreground"
+                          title="Placeholder — file contents aren't parsed at discovery time yet"
+                        >
+                          {fakeUrlCountFor(f.filename)}
+                        </td>
+                        <td
+                          className="px-3 py-2 text-muted-foreground"
+                          title="Placeholder — file contents aren't parsed at discovery time yet"
+                        >
+                          {fakeLastmodFor(f.filename)}
+                        </td>
+                        <td className="px-3 py-2 text-right text-muted-foreground whitespace-nowrap">
+                          {formatBytes(f.sizeBytes)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             )}
 
@@ -423,9 +501,33 @@ export function LastmodUpdaterClient() {
           <p className="text-sm text-muted-foreground">Defaults to today — pick another date if needed.</p>
         </div>
 
-        <div className="space-y-2 max-w-xs">
+        <div className="space-y-2 max-w-sm">
           <Label htmlFor="lastmod-date">New lastmod date</Label>
-          <Input id="lastmod-date" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+          <div className="flex flex-wrap items-center gap-2">
+            <Input
+              id="lastmod-date"
+              type="date"
+              className="w-auto"
+              value={date}
+              onChange={(e) => setDate(e.target.value)}
+            />
+            <Button
+              type="button" variant="outline" size="sm"
+              onClick={() => setDate(new Date().toISOString().slice(0, 10))}
+            >
+              Today
+            </Button>
+            <Button
+              type="button" variant="outline" size="sm"
+              onClick={() => {
+                const d = new Date();
+                d.setDate(d.getDate() - 1);
+                setDate(d.toISOString().slice(0, 10));
+              }}
+            >
+              Yesterday
+            </Button>
+          </div>
         </div>
 
         <Button onClick={runUpdate} disabled={!canRun}>

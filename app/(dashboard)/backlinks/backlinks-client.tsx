@@ -67,7 +67,10 @@ export interface AssignedWebsiteOption {
 interface BacklinksClientProps {
   rows: BacklinkRow[];
   total: number;
-  stats: { total: number; live: number; pending: number; broken: number; pendingReview: number };
+  stats: {
+    total: number; live: number; pending: number; broken: number; pendingReview: number;
+    weeklyNew: number; pendingReviewMembers: number;
+  };
   page: number;
   pageSize: number;
   isSuperAdmin: boolean;
@@ -130,6 +133,18 @@ export function BacklinksClient({
   useEffect(() => { setRows(initialRows); }, [initialRows]);
 
   const [addOpen, setAddOpen] = useState(false);
+
+  // Opened via the topbar's "+ New Backlink" quick action (router.push("/backlinks?add=1")).
+  useEffect(() => {
+    if (searchParams.get("add") === "1" && !isSuperAdmin) {
+      setAddOpen(true);
+      const p = new URLSearchParams(searchParams.toString());
+      p.delete("add");
+      router.replace(p.size > 0 ? `/backlinks?${p.toString()}` : "/backlinks");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
+
   const [editItem, setEditItem] = useState<BacklinkRow | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -429,11 +444,31 @@ export function BacklinksClient({
 
       {/* ── Stats cards ── */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-        <StatCard icon={Link2}       label="Total"          value={stats.total}         color="primary" />
-        <StatCard icon={TrendingUp}  label="Live"           value={stats.live}          color="emerald" />
-        <StatCard icon={Clock}       label="Pending"        value={stats.pending}       color="amber" />
-        <StatCard icon={AlertTriangle} label="Broken"       value={stats.broken}        color="rose" />
-        <StatCard icon={ShieldAlert} label="Pending Review" value={stats.pendingReview} color="orange" />
+        <StatCard
+          icon={Link2} label="Total Backlinks" value={stats.total} color="primary"
+          tag={`+${stats.weeklyNew} this wk`} tagTone="up"
+          caption="Aggregated live database"
+        />
+        <StatCard
+          icon={TrendingUp} label="Live & Verified" value={stats.live} color="emerald"
+          tag={`${stats.total > 0 ? ((stats.live / stats.total) * 100).toFixed(1) : "0"}% verified`}
+          caption="Returning 200 HTTP code"
+        />
+        <StatCard
+          icon={Clock} label="Pending Retry" value={stats.pending} color="amber"
+          tag="Queue"
+          caption="Automated retry in 15m"
+        />
+        <StatCard
+          icon={AlertTriangle} label="Broken Links" value={stats.broken} color="rose"
+          tag="Action Req"
+          caption="404 or Target Removed"
+        />
+        <StatCard
+          icon={ShieldAlert} label="Pending Review" value={stats.pendingReview} color="orange"
+          tag="Manual QA"
+          caption={`${stats.pendingReviewMembers} team member${stats.pendingReviewMembers === 1 ? "" : "s"} assigned`}
+        />
       </div>
 
       {/* ── Filters ── */}
@@ -642,26 +677,38 @@ export function BacklinksClient({
 
 // ─── Stat card ────────────────────────────────────────────────────────────────
 
-function StatCard({ icon: Icon, label, value, color }: {
+function StatCard({ icon: Icon, label, value, color, tag, tagTone = "neutral", caption }: {
   icon: React.ElementType; label: string; value: number;
   color: "primary" | "emerald" | "amber" | "rose" | "orange";
+  tag: string;
+  tagTone?: "up" | "neutral";
+  caption: string;
 }) {
   const colors = {
     primary: "bg-primary/10 text-primary",
-    emerald: "bg-emerald-500/10 text-emerald-600",
-    amber:   "bg-amber-500/10 text-amber-600",
-    rose:    "bg-rose-500/10 text-rose-600",
-    orange:  "bg-orange-500/10 text-orange-600",
+    emerald: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
+    amber:   "bg-amber-500/10 text-amber-600 dark:text-amber-400",
+    rose:    "bg-rose-500/10 text-rose-600 dark:text-rose-400",
+    orange:  "bg-orange-500/10 text-orange-600 dark:text-orange-400",
   };
   return (
-    <div className="rounded-xl border border-border bg-card p-4 flex items-center gap-3">
-      <div className={cn("rounded-lg p-2.5 shrink-0", colors[color])}>
-        <Icon className="h-4 w-4" />
+    <div className="rounded-xl border border-border bg-card p-4 space-y-3">
+      <div className="flex items-start justify-between gap-2">
+        <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">{label}</p>
+        <div className={cn("rounded-lg p-2 shrink-0", colors[color])}>
+          <Icon className="h-4 w-4" />
+        </div>
       </div>
-      <div>
-        <p className="text-2xl font-bold leading-none">{value}</p>
-        <p className="text-xs text-muted-foreground mt-1">{label}</p>
+      <div className="flex items-baseline gap-2 flex-wrap">
+        <p className="text-2xl font-bold leading-none">{value.toLocaleString()}</p>
+        <span className={cn(
+          "text-xs font-medium",
+          tagTone === "up" ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground"
+        )}>
+          {tag}
+        </span>
       </div>
+      <p className="text-xs text-muted-foreground border-t border-border pt-2">{caption}</p>
     </div>
   );
 }

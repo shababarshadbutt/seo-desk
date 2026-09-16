@@ -97,13 +97,21 @@ export default async function BacklinksPage({
     filter.createdAt = dateFilter;
   }
 
-  const [rawRows, total, liveCount, pendingCount, brokenCount, pendingReviewCount] = await Promise.all([
+  const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+  const velocityFilter = { ...filter, createdAt: { $gte: sevenDaysAgo } };
+
+  const [
+    rawRows, total, liveCount, pendingCount, brokenCount, pendingReviewCount,
+    weeklyNew, pendingReviewMemberIds,
+  ] = await Promise.all([
     Backlink.find(filter).sort({ createdAt: -1 }).skip((page - 1) * PAGE_SIZE).limit(PAGE_SIZE).lean(),
     Backlink.countDocuments(filter),
     Backlink.countDocuments({ ...filter, status: "live" }),
     Backlink.countDocuments({ ...filter, status: "pending" }),
     Backlink.countDocuments({ ...filter, status: "broken" }),
     Backlink.countDocuments({ ...filter, approvalStatus: "pending" }),
+    Backlink.countDocuments(velocityFilter),
+    Backlink.distinct("userId", { ...filter, approvalStatus: "pending" }),
   ]);
 
   // Per-member and per-group counts
@@ -165,7 +173,10 @@ export default async function BacklinksPage({
       <BacklinksClient
         rows={rows}
         total={total}
-        stats={{ total, live: liveCount, pending: pendingCount, broken: brokenCount, pendingReview: pendingReviewCount }}
+        stats={{
+          total, live: liveCount, pending: pendingCount, broken: brokenCount, pendingReview: pendingReviewCount,
+          weeklyNew, pendingReviewMembers: pendingReviewMemberIds.length,
+        }}
         page={page}
         pageSize={PAGE_SIZE}
         isSuperAdmin={isSuperAdmin}
