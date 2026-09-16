@@ -34,6 +34,13 @@
     /* blue-500 */
     --ring: 217 91% 60%;
     --radius: 0.5rem;
+
+    /* Sidebar — light mode: close to card, dark text */
+    --sidebar-background: 0 0% 100%;
+    --sidebar-foreground: 222 47% 11%;
+    --sidebar-muted-foreground: 215 19% 35%;
+    --sidebar-border: 214 32% 91%;
+    --sidebar-accent: 210 40% 96%;
   }
 
   .dark {
@@ -69,6 +76,13 @@
     --input: 220 44% 13%;
     /* blue-500, unchanged across modes */
     --ring: 217 91% 60%;
+
+    /* Sidebar — dark mode: unchanged visual (was hardcoded #0b1120/slate) */
+    --sidebar-background: 223 49% 8%;
+    --sidebar-foreground: 210 40% 96%;
+    --sidebar-muted-foreground: 215 20% 65%;
+    --sidebar-border: 217 33% 17%;
+    --sidebar-accent: 217 33% 17%;
   }
 }
 

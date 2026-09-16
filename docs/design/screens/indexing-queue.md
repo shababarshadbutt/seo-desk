@@ -74,3 +74,51 @@ To be preserved exactly through the redesign:
 - **QueueClient state/handlers**: `fetchUrls` callback, `useEffect` filter-triggered re-fetch (resets to page 1), `useTransition` pending-state, `handleSearch` (commit-on-Enter/Go, not live), sitemaps toggle, prev/next pagination logic, `statusBadge`/`fmt` helpers' *logic* (colors will be re-themed, but the pending/submitted/failed → label mapping and date formatting stay the same) — all untouched.
 - **API contract**: `GET /api/indexing-queue/[websiteId]?page=&gscStatus=&bingStatus=&search=` — call shape, query params, and consumption of `{ urls, pagination }` response shape unchanged.
 - **No new functionality added**: no dispatch/export/re-index/inspect actions, despite Stitch depicting them (see scope note above).
+
+---
+
+# Correction (2026-09-16)
+
+The paragraphs above ("Zero semantic design tokens", "no dispatch API", "no dispatch/export/re-index/inspect actions") describe the Phase 11 state only and are **no longer accurate** — a "Part B" functional-expansion pass (undated in this file, prior to Part C below) already added real dispatch (`streamDispatch` → `/api/indexing-queue/[websiteId]/dispatch`), per-row resubmit, CSV export (list page), search, filter tabs, and the "Add Single URL" dialog, all using semantic tokens (`bg-card`, `border-border`, `text-foreground`, `bg-primary`, etc.). Left uncorrected until now because this doc wasn't revisited after that pass shipped.
+
+---
+
+# Part C — Pixel-Fidelity & Additional Real Functionality (2026-09-16)
+
+Brings this screen to the same visual polish already applied to Backlinks/Lastmod Updater/Sitemap Cleaner (icon stat cards, topbar status pill, real per-row data), and closes a few more of the Stitch-vs-implementation gaps noted above — real where buildable from existing data/APIs, disclosed placeholder otherwise.
+
+**New shared component**: `app/(dashboard)/indexing-queue/stat-card.tsx` — `StatCard` (icon + value + label), used by both the list and detail server components to avoid the duplicated inline `SummaryCard`/`StatCard` functions that existed before.
+
+**List page** (`page.tsx` / `indexing-queue-list-client.tsx`):
+- Icon stat cards (real totals, same aggregation as before).
+- "N Automated Websites" (real) + "Live Sync: XX.X% Health" (placeholder) header badges.
+- **Refresh** button (`router.refresh()`, real).
+- **"All Engine Statuses"** dropdown — real client-side filter over the already-computed per-website counts (Has GSC/Bing Failed/Pending).
+- Per-website avatar chip (initials + deterministic color from the real name — cosmetic only, not a placeholder) and external-link icon on the domain.
+- Client-side pagination (page size 10) over the already-fully-loaded rows.
+
+**Detail page** (`[websiteId]/page.tsx` / `queue-client.tsx`):
+- Breadcrumb, "Active Monitoring" dot (placeholder) + real "N Sitemaps Synced", static Primary/Secondary Engine + Frequency line (placeholder text), "Site ID" chip (placeholder).
+- Icon stat cards incl. a new real "Sitemaps" card.
+- Sitemaps panel restyled as a card grid — **real fields only** (url + discovered date); per user decision (2026-09-16), no fabricated per-sitemap URL-count/HTTP-status/"GSC Valid" data, since `Website.sitemaps` has no such fields.
+- GSC/Bing filter buttons now show real counts (`statusCounts` passed down from the server component).
+- **Bulk Re-submit Selected** — real: reuses the existing per-row `POST /api/indexing-queue/[websiteId]/urls/[id]/resubmit` for each checked row, sequentially, against the current engine toggle. No new API route.
+- **Inspect** per-row action — real: opens a dialog with the row's already-fetched fields. No new data.
+- Status badges surface an inline HTTP code when `gscError`/`bingError` contains one (real error-text parsing, not fabricated).
+- Numbered pagination (replacing prev/next-only), same `fetchUrls`/`page` param contract.
+- **Export CSV** (detail page) — real but client-side only: serializes the currently-loaded/filtered `urls` array to a CSV Blob download. No backend route added; `app/api/**` untouched throughout this pass.
+- **Refresh Status** — re-runs `fetchUrls` + `router.refresh()`.
+
+**Topbar**: new `IndexerDaemonPill` on `/indexing-queue*` (same disclosed-placeholder pattern as `S3PipelinePill`/`CrawlerStatusPill`/`DailyReportsSyncPill`), backed by `lib/indexer-daemon-fake-stats.ts`.
+
+**Known Placeholders** (presentational, not backed by a real system — replace when real data/integrations exist):
+
+| Element | Where | Source |
+|---|---|---|
+| "Indexer Daemon: Active • ..." topbar pill | Topbar, `/indexing-queue*` | `lib/indexer-daemon-fake-stats.ts` (rotating preset, per page load) |
+| "Live Sync: XX.X% Health" badge | List page header | `lib/indexing-queue-fake-stats.ts` → `fakeSyncHealthPct` (deterministic per day) |
+| "Site ID: xxx-####-sync" chip | Detail page header | `lib/indexing-queue-fake-stats.ts` → `fakeSiteId` (deterministic per website id) |
+| "Active Monitoring" dot | Detail page header | Static, no per-site monitoring exists |
+| "Primary Engine / Secondary Engine / Frequency" line | Detail page header | Static descriptive text, no per-website engine config exists |
+
+**Business behavior preserved**: everything listed in "Business Behavior Snapshot" above, plus the Part B additions (dispatch/resubmit/CSV-export/add-URL contracts) — untouched. No file under `app/api/**` was modified in this pass.

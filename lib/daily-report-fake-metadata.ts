@@ -34,6 +34,24 @@ export function formatShiftDuration(minutes: number): string {
   return `${h}h ${m}m`;
 }
 
+// Deterministic per-user accent color — purely cosmetic (avatar circle +
+// title pill tinting), not a data value, so it needs no placeholder flag.
+export const USER_COLORS = ["rose", "sky", "amber", "emerald", "violet", "cyan"] as const;
+export type UserColor = (typeof USER_COLORS)[number];
+
+export function userColor(userId: string): UserColor {
+  return USER_COLORS[hashString(userId) % USER_COLORS.length];
+}
+
+// Deterministic fallback tag label for a report entry that has no matching
+// DailyTask category data yet — same placeholder convention as the rest of
+// this file (flagged in the UI with the muted-dot + tooltip).
+const FALLBACK_TAGS = ["General Update", "Daily Sync", "Status Update"] as const;
+
+export function fakeEntryTag(recordId: string): string {
+  return FALLBACK_TAGS[hashString(recordId + "-tag") % FALLBACK_TAGS.length];
+}
+
 export interface FakeDailyStats {
   backlinksVelocityPct: number;
   backlinksQuotaPct: number;

@@ -1,12 +1,28 @@
-import { Suspense } from "react";
 import { redirect } from "next/navigation";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { connectDB, ExecutionLog, Backlink, ContentTask, Group } from "@/lib/mongodb";
-import { Badge } from "@/components/ui/badge";
-import { Play, ScrollText, CheckCircle, XCircle } from "lucide-react";
-import { OverviewFilters } from "./overview-filters";
-import { cn } from "@/lib/utils";
+import { connectDB, ExecutionLog, Backlink, ContentTask, DailyReport, Group } from "@/lib/mongodb";
+import {
+  getExecutionTrend,
+  getWeeklyVelocity,
+  getDomainStats,
+  getIndexingBacklog,
+  getSpecialistVelocity,
+  getQuotaUsage,
+  getSpecialistLeaderboard,
+  getGroupMemberIds,
+  getUserScope,
+  type ContentStat,
+} from "@/lib/dashboard-stats";
+import { DashboardHeader } from "./_dashboard/dashboard-header";
+import { KpiRow } from "./_dashboard/kpi-row";
+import { BacklinksDonut } from "./_dashboard/backlinks-donut";
+import { WeeklyVelocityPanel } from "./_dashboard/weekly-velocity-panel";
+import { AutomationDaemonsPanel } from "./_dashboard/automation-daemons-panel";
+import { SpecialistLeaderboard } from "./_dashboard/specialist-leaderboard";
+import { SpecialistSummaryCard } from "./_dashboard/specialist-summary-card";
+import { ContentPipelinePanel } from "./_dashboard/content-pipeline-panel";
+import { LiveStreamPanel } from "./_dashboard/live-stream-panel";
 
 type ContentTaskType = "landing-request" | "blog-request" | "landing-update" | "blog-publish";
 
@@ -16,6 +32,12 @@ const CONTENT_LABELS: Record<ContentTaskType, string> = {
   "landing-update":  "Landing Pages Update",
   "blog-publish":    "Blogs Publish",
 };
+
+function roleLabel(role: string): string {
+  if (role === "super-admin") return "Super Admin";
+  if (role === "sub-lead") return "Supervisor";
+  return "User";
+}
 
 async function getUserFilter(role: string, myId: string): Promise<Record<string, unknown>> {
   if (role === "super-admin") return {};
@@ -57,6 +79,8 @@ export default async function OverviewPage({
     if (to) { const d = new Date(to); d.setHours(23, 59, 59, 999); df.$lte = d; }
     execFilter.startedAt = df;
   }
+
+  const groupMemberIds = await getGroupMemberIds(role, myId);
 
   // Fetch all stats in parallel
   const [execStats, blStats, contentStats] = await Promise.all([
@@ -101,142 +125,91 @@ export default async function OverviewPage({
   const [blTotal, blLive, blPending, blBroken] = blStats;
   const isFiltered = !!(from || to);
 
-  const roleSubtitle =
-    role === "super-admin" ? "Full admin access — viewing all team data." :
-    role === "sub-lead"    ? "Supervisor view — viewing your team's data." :
-                             "Your personal activity summary.";
+  const canSeeLeaderboard = role === "super-admin" || role === "sub-lead";
+  const userScope = getUserScope(role, myId, groupMemberIds);
+
+  const [execTrend, weeklyVelocity, domainStats, indexingBacklog, specialistVelocity, quota, leaderboard, myDailyReports] =
+    await Promise.all([
+      getExecutionTrend(userFilter, from, to),
+      getWeeklyVelocity(userFilter),
+      getDomainStats(role, myId, groupMemberIds),
+      getIndexingBacklog(role, myId, groupMemberIds),
+      getSpecialistVelocity(userFilter, userScope, contentStats as ContentStat[]),
+      getQuotaUsage(role, myId, groupMemberIds),
+      canSeeLeaderboard ? getSpecialistLeaderboard(userFilter, userScope) : Promise.resolve(null),
+      canSeeLeaderboard ? Promise.resolve(0) : DailyReport.countDocuments(userFilter),
+    ]);
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-6">
+      <DashboardHeader
+        firstName={session?.user?.name?.split(" ")[0] ?? ""}
+        role={role}
+        roleLabel={roleLabel(role)}
+        totalSpecialists={specialistVelocity.totalSpecialists}
+        websites={domainStats.websites}
+        exportData={{
+          generatedAt: new Date().toISOString(),
+          exec: { total: execTotal, success: execSuccess, error: execError, running: execRunning },
+          backlinks: { total: blTotal, live: blLive, pending: blPending, broken: blBroken },
+          domains: domainStats,
+          specialists: specialistVelocity,
+          contentPipeline: contentStats as ContentStat[],
+          leaderboard: (leaderboard?.rows ?? []).map((r) => ({
+            name: r.name,
+            role: r.role,
+            backlinks: r.backlinks,
+            dailyReports: r.dailyReports,
+            executions: r.executions,
+          })),
+        }}
+      />
 
-      {/* ── Header ── */}
-      <div>
-        <h2 className="text-2xl font-bold text-foreground">
-          Welcome back, {session?.user?.name?.split(" ")[0]}
-        </h2>
-        <p className="text-muted-foreground text-sm mt-1">{roleSubtitle}</p>
+      {isFiltered && (
+        <p className="text-xs text-muted-foreground">
+          Filtered{from ? ` from ${from}` : ""}{to ? ` to ${to}` : ""}
+        </p>
+      )}
+
+      <KpiRow
+        exec={{
+          total: execTotal,
+          success: execSuccess,
+          error: execError,
+          running: execRunning,
+          changePct: execTrend.changePct,
+          changeCaption: execTrend.isCustomRange ? "vs. prior period" : "vs. prior 30 days",
+        }}
+        backlinks={{ total: blTotal, live: blLive, pending: blPending, broken: blBroken }}
+        domains={domainStats}
+        specialists={specialistVelocity}
+      />
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
+        <BacklinksDonut live={blLive} pending={blPending} broken={blBroken} />
+        <WeeklyVelocityPanel days={weeklyVelocity} quota={quota} />
+        <div className="lg:col-span-2 xl:col-span-1">
+          <AutomationDaemonsPanel indexingBacklog={indexingBacklog} />
+        </div>
       </div>
 
-      {/* ── Script Executions ── */}
-      <section className="space-y-3">
-        <div className="flex items-center justify-between gap-4 flex-wrap">
-          <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-            Script Executions
-          </h3>
-          <Suspense>
-            <OverviewFilters />
-          </Suspense>
-        </div>
-        {isFiltered && (
-          <p className="text-xs text-muted-foreground">
-            Filtered{from ? ` from ${from}` : ""}{to ? ` to ${to}` : ""}
-          </p>
-        )}
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-          {([
-            { label: "Total Runs", value: execTotal,   icon: ScrollText,  accent: "text-primary bg-primary/10" },
-            { label: "Successful", value: execSuccess,  icon: CheckCircle, accent: "text-emerald-600 bg-emerald-500/10" },
-            { label: "Failed",     value: execError,    icon: XCircle,     accent: "text-rose-600 bg-rose-500/10" },
-            { label: "Running",    value: execRunning,  icon: Play,        accent: "text-amber-600 bg-amber-500/10" },
-          ] as const).map(({ label, value, icon: Icon, accent }) => (
-            <div key={label} className="rounded-xl border border-border bg-card p-4 shadow-sm">
-              <div className="flex items-center justify-between">
-                <p className="text-xs font-medium text-muted-foreground">{label}</p>
-                <span className={cn("flex h-7 w-7 items-center justify-center rounded-lg", accent)}>
-                  <Icon className="h-4 w-4" />
-                </span>
-              </div>
-              <p className="mt-2 text-3xl font-bold text-foreground">{value as number}</p>
-            </div>
-          ))}
-        </div>
-      </section>
+      {canSeeLeaderboard && leaderboard ? (
+        <SpecialistLeaderboard rows={leaderboard.rows} totalUsers={leaderboard.totalUsers} />
+      ) : (
+        <SpecialistSummaryCard
+          backlinks={blTotal}
+          dailyReports={myDailyReports}
+          executions={execTotal}
+        />
+      )}
 
-      {/* ── Backlinks ── */}
-      <section className="space-y-3">
-        <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-          Backlinks
-        </h3>
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-          {([
-            { label: "Total",   value: blTotal,   accent: "text-primary" },
-            { label: "Live",    value: blLive,    accent: "text-emerald-600" },
-            { label: "Pending", value: blPending, accent: "text-amber-600" },
-            { label: "Broken",  value: blBroken,  accent: "text-rose-600" },
-          ] as const).map(({ label, value, accent }) => (
-            <div key={label} className="rounded-xl border border-border bg-card p-4 shadow-sm">
-              <p className={cn("text-xs font-medium", accent)}>{label}</p>
-              <p className="mt-2 text-3xl font-bold text-foreground">{value as number}</p>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      {/* ── Content Tasks ── */}
-      <section className="space-y-3">
-        <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-          Content Tasks
-        </h3>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          {contentStats.map((s) => (
-            <div key={s.type} className="rounded-xl border border-border bg-card p-4 shadow-sm">
-              <div className="flex items-start justify-between gap-2 mb-3">
-                <p className="font-medium text-sm leading-snug text-foreground">{s.label}</p>
-                <span className="text-2xl font-bold shrink-0 text-foreground">{s.total}</span>
-              </div>
-              <div className="flex gap-4 text-xs">
-                <span className="text-amber-600 font-medium">{s.pending} Pending</span>
-                <span className="text-primary font-medium">{s.inProgress} In Progress</span>
-                <span className="text-emerald-600 font-medium">{s.done} Done</span>
-              </div>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      {/* ── Recent Script Runs ── */}
-      <section>
-        <div className="rounded-xl border border-border bg-card shadow-sm">
-          <div className="border-b border-border px-4 py-3">
-            <h3 className="font-semibold text-sm text-foreground">
-              {isFiltered ? "Filtered Script Runs" : "Recent Script Runs"}
-            </h3>
-          </div>
-          {(recentRuns as { _id: { toString(): string }; scriptName: string; userName: string; startedAt: Date; status: string; durationMs?: number | null }[]).length === 0 ? (
-            <p className="px-4 py-8 text-center text-sm text-muted-foreground">
-              {isFiltered ? "No runs in this date range." : "No executions yet."}
-            </p>
-          ) : (
-            <div className="divide-y divide-border">
-              {(recentRuns as { _id: { toString(): string }; scriptName: string; userName: string; startedAt: Date; status: string; durationMs?: number | null }[]).map((log) => (
-                <div key={log._id.toString()} className="flex items-center justify-between px-4 py-3 text-sm">
-                  <div>
-                    <p className="font-medium text-foreground">{log.scriptName}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {role !== "admin" && `${log.userName} · `}
-                      {new Date(log.startedAt).toLocaleString()}
-                      {log.durationMs != null && (
-                        <span className="ml-2 text-muted-foreground/60">
-                          ({(log.durationMs / 1000).toFixed(1)}s)
-                        </span>
-                      )}
-                    </p>
-                  </div>
-                  <Badge
-                    variant={
-                      log.status === "success"   ? "success" :
-                      log.status === "error"     ? "destructive" : "warning"
-                    }
-                  >
-                    {log.status}
-                  </Badge>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      </section>
-
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <ContentPipelinePanel stats={contentStats as ContentStat[]} />
+        <LiveStreamPanel
+          runs={recentRuns as { _id: { toString(): string }; scriptName: string; userName: string; websiteName?: string | null; startedAt: Date; status: string }[]}
+          showUser={role !== "admin"}
+        />
+      </div>
     </div>
   );
 }

@@ -1,9 +1,12 @@
 import { redirect, notFound } from "next/navigation";
 import Link from "next/link";
 import { getServerSession } from "next-auth";
+import { Link2, CheckCircle2, Clock, XCircle, FileStack } from "lucide-react";
 import { authOptions } from "@/lib/auth";
 import { connectDB, Website, IndexingQueue } from "@/lib/mongodb";
+import { fakeSiteId } from "@/lib/indexing-queue-fake-stats";
 import { QueueClient } from "./queue-client";
+import { StatCard } from "../stat-card";
 
 const PAGE_SIZE = 50;
 
@@ -63,18 +66,22 @@ export default async function WebsiteQueuePage({ params }: { params: { websiteId
     })),
   };
 
+  // Presentational only — no real site-ID system exists (websites are
+  // identified by their Mongo ObjectId). Deterministic per website. See
+  // lib/indexing-queue-fake-stats.ts.
+  const siteId = fakeSiteId(websiteId);
+
   return (
     <div className="p-6 space-y-6">
       {/* Header */}
-      <div className="flex items-start justify-between">
+      <div className="flex items-start justify-between flex-wrap gap-2">
         <div>
-          <div className="flex items-center gap-2 mb-1">
-            <Link
-              href="/indexing-queue"
-              className="text-sm text-muted-foreground hover:text-foreground transition-colors"
-            >
+          <div className="flex items-center gap-1.5 mb-1 text-sm text-muted-foreground">
+            <Link href="/indexing-queue" className="hover:text-foreground transition-colors">
               ← Indexing Queue
             </Link>
+            <span>/</span>
+            <span className="text-foreground/80">{website.name}</span>
           </div>
           <h1 className="text-2xl font-bold text-foreground">{website.name}</h1>
           <a
@@ -85,18 +92,40 @@ export default async function WebsiteQueuePage({ params }: { params: { websiteId
           >
             {website.url}
           </a>
+          <div className="flex flex-wrap items-center gap-2 mt-2">
+            <span
+              className="inline-flex items-center gap-1.5 rounded-full border border-border bg-emerald-500/10 px-2.5 py-0.5 text-xs font-medium text-emerald-700 dark:text-emerald-400"
+              title="Presentational status indicator — not yet backed by real per-site monitoring"
+            >
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+              Active Monitoring
+            </span>
+            <span className="text-xs text-muted-foreground">
+              {websiteInfo.sitemapCount} Sitemap{websiteInfo.sitemapCount === 1 ? "" : "s"} Synced
+            </span>
+          </div>
+          <p className="text-xs text-muted-foreground mt-1.5">
+            Primary Engine: Google Indexing API · Secondary Engine: Bing IndexNow · Frequency: Continuous Poll
+          </p>
         </div>
+        <span
+          className="inline-flex items-center rounded-lg border border-border bg-muted/40 px-2.5 py-1 text-xs font-mono text-muted-foreground"
+          title="Presentational identifier — not a real site-ID system"
+        >
+          Site ID: {siteId}
+        </span>
       </div>
 
       {/* Stats bar */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
-        <StatCard label="Total URLs"     value={s.total}         color="primary" />
-        <StatCard label="GSC Submitted"  value={s.gscSubmitted}  color="emerald" />
-        <StatCard label="GSC Pending"    value={s.gscPending}    color="amber" />
-        <StatCard label="GSC Failed"     value={s.gscFailed}     color="rose" />
-        <StatCard label="Bing Submitted" value={s.bingSubmitted} color="emerald" />
-        <StatCard label="Bing Pending"   value={s.bingPending}   color="amber" />
-        <StatCard label="Bing Failed"    value={s.bingFailed}    color="rose" />
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <StatCard icon={Link2}       label="Total URLs"     value={s.total}         color="primary" />
+        <StatCard icon={FileStack}   label="Sitemaps"       value={websiteInfo.sitemapCount} color="primary" />
+        <StatCard icon={CheckCircle2} label="GSC Submitted"  value={s.gscSubmitted}  color="emerald" />
+        <StatCard icon={Clock}       label="GSC Pending"    value={s.gscPending}    color="amber" />
+        <StatCard icon={XCircle}     label="GSC Failed"     value={s.gscFailed}     color="rose" />
+        <StatCard icon={CheckCircle2} label="Bing Submitted" value={s.bingSubmitted} color="emerald" />
+        <StatCard icon={Clock}       label="Bing Pending"   value={s.bingPending}   color="amber" />
+        <StatCard icon={XCircle}     label="Bing Failed"    value={s.bingFailed}    color="rose" />
       </div>
 
       {/* Client component: sitemaps, filters, URL table, pagination */}
@@ -120,22 +149,11 @@ export default async function WebsiteQueuePage({ params }: { params: { websiteId
           total,
           totalPages: Math.ceil(total / PAGE_SIZE),
         }}
+        statusCounts={{
+          gscSubmitted: s.gscSubmitted, gscPending: s.gscPending, gscFailed: s.gscFailed,
+          bingSubmitted: s.bingSubmitted, bingPending: s.bingPending, bingFailed: s.bingFailed,
+        }}
       />
-    </div>
-  );
-}
-
-function StatCard({ label, value, color }: { label: string; value: number; color: "primary" | "emerald" | "amber" | "rose" }) {
-  const cls = {
-    primary: "bg-primary/10 text-primary",
-    emerald: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
-    amber:   "bg-amber-500/10 text-amber-700 dark:text-amber-400",
-    rose:    "bg-rose-500/10 text-rose-700 dark:text-rose-400",
-  }[color];
-  return (
-    <div className={`rounded-xl border border-border px-4 py-3 ${cls}`}>
-      <div className="text-xl font-bold">{value.toLocaleString()}</div>
-      <div className="text-xs mt-0.5 opacity-70">{label}</div>
     </div>
   );
 }

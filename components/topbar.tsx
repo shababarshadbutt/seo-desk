@@ -3,15 +3,19 @@
 import { usePathname, useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Search, Bell, Globe, Play, Loader2, Radar, Plus, Database, History } from "lucide-react";
+import { Search, Bell, Globe, Play, Loader2, Radar, Plus, Database, History, Zap, Activity, ChevronRight } from "lucide-react";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Button } from "@/components/ui/button";
 import { AuditHistoryDialog } from "@/components/audit-history-dialog";
+import { QuickAutomationDialog } from "@/components/quick-automation-dialog";
 import { randomCrawlerStatus } from "@/lib/crawler-status-fake-stats";
+import { randomSyncEngineStatus } from "@/lib/daily-reports-sync-fake-stats";
+import { randomIndexerDaemonStatus } from "@/lib/indexer-daemon-fake-stats";
+import { randomSystemHealth } from "@/lib/system-health-fake-stats";
 import { cn } from "@/lib/utils";
 
 const pageTitles: Record<string, string> = {
-  "/": "Overview",
+  "/": "Dashboard",
   "/scripts": "Scripts",
   "/lastmod-updater": "Lastmod Updater",
   "/sitemap-cleaner": "Sitemap Cleaner",
@@ -46,17 +50,32 @@ export function Topbar() {
   const pathname = usePathname();
   const router = useRouter();
   const { data: session } = useSession();
+  const isDashboard = pathname === "/";
   const isBacklinks = pathname === "/backlinks";
+  const isDailyReports = pathname === "/daily-reports";
+  const isIndexingQueue = pathname.startsWith("/indexing-queue");
   const sitemapToolLabel = SITEMAP_TOOL_LABELS[pathname];
   const isSuperAdmin = session?.user.role === "super-admin";
   const [auditOpen, setAuditOpen] = useState(false);
+  const [quickAutomationOpen, setQuickAutomationOpen] = useState(false);
 
   return (
     <header className="flex h-14 items-center justify-between border-b border-border bg-background pl-14 pr-4 lg:px-6 gap-3">
-      <h1 className="text-base font-semibold text-foreground shrink-0">
-        {getTitle(pathname)}
-      </h1>
+      <div className="flex items-center gap-1.5 shrink-0">
+        {isDashboard && (
+          <span className="hidden md:flex items-center gap-1 text-sm text-muted-foreground">
+            Console
+            <ChevronRight className="h-3.5 w-3.5" />
+          </span>
+        )}
+        <h1 className="text-base font-semibold text-foreground">
+          {getTitle(pathname)}
+        </h1>
+      </div>
+      {isDashboard && <SystemHealthPill />}
       {isBacklinks && <CrawlerStatusPill />}
+      {isDailyReports && <DailyReportsSyncPill />}
+      {isIndexingQueue && <IndexerDaemonPill />}
       {sitemapToolLabel && <S3PipelinePill />}
       <div className="flex-1 flex justify-end lg:justify-center max-w-md ml-auto">
         <GlobalSearch />
@@ -64,6 +83,12 @@ export function Topbar() {
       <div className="flex items-center gap-2 shrink-0">
         <NotificationBell />
         <ThemeToggle />
+        {isDashboard && (
+          <Button size="sm" onClick={() => setQuickAutomationOpen(true)}>
+            <Plus className="h-4 w-4" />
+            <span className="hidden sm:inline">Quick Automation</span>
+          </Button>
+        )}
         {isBacklinks && !isSuperAdmin && (
           <Button size="sm" onClick={() => router.push("/backlinks?add=1")}>
             <Plus className="h-4 w-4" />
@@ -80,7 +105,36 @@ export function Topbar() {
       {sitemapToolLabel && (
         <AuditHistoryDialog open={auditOpen} onOpenChange={setAuditOpen} toolLabel={sitemapToolLabel} />
       )}
+      {isDashboard && (
+        <QuickAutomationDialog open={quickAutomationOpen} onOpenChange={setQuickAutomationOpen} mode="all" />
+      )}
     </header>
+  );
+}
+
+// ─── System health pill (Dashboard only) ──────────────────────────────────────
+// Presentational only — no uptime/health monitoring integration exists in this
+// app. Rotates through a small preset pool on each load. See
+// lib/system-health-fake-stats.ts.
+
+function SystemHealthPill() {
+  const [status, setStatus] = useState<{ label: string; sublabel: string } | null>(null);
+
+  useEffect(() => {
+    setStatus(randomSystemHealth());
+  }, []);
+
+  if (!status) return null;
+
+  return (
+    <div
+      className="hidden md:flex items-center gap-1.5 rounded-lg border border-border bg-emerald-500/10 px-2.5 py-1 text-xs shrink-0"
+      title="Presentational status indicator — not yet backed by a real monitoring integration"
+    >
+      <Activity className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
+      <span className="font-medium text-emerald-700 dark:text-emerald-400">{status.label}</span>
+      <span className="text-muted-foreground">{status.sublabel}</span>
+    </div>
   );
 }
 
@@ -134,6 +188,58 @@ function CrawlerStatusPill() {
       title="Presentational status indicator — not yet backed by a real monitoring integration"
     >
       <Radar className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
+      <span className="font-medium text-emerald-700 dark:text-emerald-400">{status.label}</span>
+      <span className="text-muted-foreground">{status.sublabel}</span>
+    </div>
+  );
+}
+
+// ─── Daily Reports sync-engine pill (Daily Reports only) ──────────────────────
+// Presentational only — reports are fetched directly from MongoDB on each page
+// load, no realtime sync/aggregation engine exists. Rotates through a small
+// preset pool on each load. See lib/daily-reports-sync-fake-stats.ts.
+
+function DailyReportsSyncPill() {
+  const [status, setStatus] = useState<{ label: string; sublabel: string } | null>(null);
+
+  useEffect(() => {
+    setStatus(randomSyncEngineStatus());
+  }, []);
+
+  if (!status) return null;
+
+  return (
+    <div
+      className="hidden md:flex items-center gap-1.5 rounded-lg border border-border bg-emerald-500/10 px-2.5 py-1 text-xs shrink-0"
+      title="Presentational status indicator — not yet backed by a real sync/aggregation engine"
+    >
+      <Zap className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
+      <span className="font-medium text-emerald-700 dark:text-emerald-400">{status.label}</span>
+      <span className="text-muted-foreground">{status.sublabel}</span>
+    </div>
+  );
+}
+
+// ─── Indexer daemon status pill (Indexing Queue only) ─────────────────────────
+// Presentational only — no background daemon/monitoring process exists;
+// dispatch only happens on user action. Rotates through a small preset pool
+// on each load. See lib/indexer-daemon-fake-stats.ts.
+
+function IndexerDaemonPill() {
+  const [status, setStatus] = useState<{ label: string; sublabel: string } | null>(null);
+
+  useEffect(() => {
+    setStatus(randomIndexerDaemonStatus());
+  }, []);
+
+  if (!status) return null;
+
+  return (
+    <div
+      className="hidden md:flex items-center gap-1.5 rounded-lg border border-border bg-emerald-500/10 px-2.5 py-1 text-xs shrink-0"
+      title="Presentational status indicator — not yet backed by a real background daemon"
+    >
+      <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
       <span className="font-medium text-emerald-700 dark:text-emerald-400">{status.label}</span>
       <span className="text-muted-foreground">{status.sublabel}</span>
     </div>

@@ -1,8 +1,11 @@
 import { redirect } from "next/navigation";
 import { getServerSession } from "next-auth";
+import { Link2, CheckCircle2, Clock, XCircle } from "lucide-react";
 import { authOptions } from "@/lib/auth";
 import { connectDB, Website, IndexingQueue } from "@/lib/mongodb";
+import { fakeSyncHealthPct } from "@/lib/indexing-queue-fake-stats";
 import { IndexingQueueListClient } from "./indexing-queue-list-client";
+import { StatCard } from "./stat-card";
 
 export default async function IndexingQueuePage() {
   const session = await getServerSession(authOptions);
@@ -62,42 +65,45 @@ export default async function IndexingQueuePage() {
     { total: 0, gscPending: 0, gscSubmitted: 0, gscFailed: 0, bingPending: 0, bingSubmitted: 0, bingFailed: 0 }
   );
 
+  // Presentational only — no real sync-health scoring exists yet. Stable for
+  // the calendar day so it doesn't flicker on every reload. See
+  // lib/indexing-queue-fake-stats.ts.
+  const syncHealthPct = fakeSyncHealthPct(new Date().toISOString().slice(0, 10));
+
   return (
     <div className="p-6 space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-foreground">Indexing Queue</h1>
-        <p className="text-sm text-muted-foreground mt-1">{rows.length} automated website(s)</p>
+        <p className="text-sm text-muted-foreground mt-1">
+          Real-time automated submission status to Google Search Console (GSC Indexing API) and Bing IndexNow across enterprise web properties.
+        </p>
+        <div className="flex flex-wrap items-center gap-2 mt-3">
+          <span className="inline-flex items-center rounded-full border border-border bg-primary/10 px-3 py-1 text-xs font-medium text-primary">
+            {rows.length} Automated Website{rows.length === 1 ? "" : "s"}
+          </span>
+          <span
+            className="inline-flex items-center gap-1.5 rounded-full border border-border bg-emerald-500/10 px-3 py-1 text-xs font-medium text-emerald-700 dark:text-emerald-400"
+            title="Presentational status indicator — not yet backed by a real health-scoring system"
+          >
+            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+            Live Sync: {syncHealthPct}% Health
+          </span>
+        </div>
       </div>
 
       {/* Grand total summary */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <SummaryCard label="Total URLs" value={totals.total} color="primary" />
-        <SummaryCard label="GSC Submitted" value={totals.gscSubmitted} color="emerald" />
-        <SummaryCard label="GSC Pending" value={totals.gscPending} color="amber" />
-        <SummaryCard label="GSC Failed" value={totals.gscFailed} color="rose" />
-        <SummaryCard label="Bing Submitted" value={totals.bingSubmitted} color="emerald" />
-        <SummaryCard label="Bing Pending" value={totals.bingPending} color="amber" />
-        <SummaryCard label="Bing Failed" value={totals.bingFailed} color="rose" />
+        <StatCard icon={Link2} label="Total URLs" value={totals.total} color="primary" />
+        <StatCard icon={CheckCircle2} label="GSC Submitted" value={totals.gscSubmitted} color="emerald" />
+        <StatCard icon={Clock} label="GSC Pending" value={totals.gscPending} color="amber" />
+        <StatCard icon={XCircle} label="GSC Failed" value={totals.gscFailed} color="rose" />
+        <StatCard icon={CheckCircle2} label="Bing Submitted" value={totals.bingSubmitted} color="emerald" />
+        <StatCard icon={Clock} label="Bing Pending" value={totals.bingPending} color="amber" />
+        <StatCard icon={XCircle} label="Bing Failed" value={totals.bingFailed} color="rose" />
       </div>
 
       {/* Website table */}
       <IndexingQueueListClient rows={rows} />
-    </div>
-  );
-}
-
-function SummaryCard({ label, value, color }: { label: string; value: number; color: "primary" | "emerald" | "amber" | "rose" }) {
-  const colorClass = {
-    primary: "bg-primary/10 text-primary",
-    emerald: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
-    amber:   "bg-amber-500/10 text-amber-700 dark:text-amber-400",
-    rose:    "bg-rose-500/10 text-rose-700 dark:text-rose-400",
-  }[color];
-
-  return (
-    <div className={`rounded-xl border border-border px-4 py-3 ${colorClass}`}>
-      <div className="text-xl font-bold">{value.toLocaleString()}</div>
-      <div className="text-xs mt-0.5 opacity-70">{label}</div>
     </div>
   );
 }

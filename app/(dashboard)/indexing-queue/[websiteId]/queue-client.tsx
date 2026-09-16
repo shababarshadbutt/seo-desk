@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useCallback, useEffect, useRef, useTransition } from "react";
-import { ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Search, Zap, RotateCw, Plus, Loader2 } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Search, Zap, RotateCw, Plus, Loader2, Download, Eye } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -40,23 +41,43 @@ type WebsiteInfo = {
   sitemaps: Sitemap[];
 };
 
+type StatusCounts = {
+  gscSubmitted: number; gscPending: number; gscFailed: number;
+  bingSubmitted: number; bingPending: number; bingFailed: number;
+};
+
 type Props = {
   websiteId: string;
   initialWebsite: WebsiteInfo;
   initialUrls: UrlRow[];
   initialPagination: Pagination;
+  statusCounts: StatusCounts;
 };
 
-const STATUS_OPTIONS = [
-  { value: "all",       label: "All" },
-  { value: "pending",   label: "Pending" },
-  { value: "submitted", label: "Submitted" },
-  { value: "failed",    label: "Failed" },
-];
+function statusOptions(counts: { pending: number; submitted: number; failed: number }) {
+  return [
+    { value: "all",       label: "All" },
+    { value: "pending",   label: `Pending (${counts.pending.toLocaleString()})` },
+    { value: "submitted", label: `Submitted (${counts.submitted.toLocaleString()})` },
+    { value: "failed",    label: `Failed (${counts.failed.toLocaleString()})` },
+  ];
+}
 
-function statusBadge(status: string) {
+function httpCodeFrom(error: string | null): string | null {
+  const match = error?.match(/\bHTTP\s?(\d{3})\b/i);
+  return match ? match[1] : null;
+}
+
+function statusBadge(status: string, error: string | null) {
   if (status === "submitted") return <span className="inline-block rounded-full bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 px-2 py-0.5 text-xs font-medium">Submitted</span>;
-  if (status === "failed")    return <span className="inline-block rounded-full bg-rose-500/10 text-rose-700 dark:text-rose-400 px-2 py-0.5 text-xs font-medium">Failed</span>;
+  if (status === "failed") {
+    const httpCode = httpCodeFrom(error);
+    return (
+      <span className="inline-block rounded-full bg-rose-500/10 text-rose-700 dark:text-rose-400 px-2 py-0.5 text-xs font-medium">
+        Failed{httpCode ? ` (HTTP ${httpCode})` : ""}
+      </span>
+    );
+  }
   return <span className="inline-block rounded-full bg-amber-500/10 text-amber-700 dark:text-amber-400 px-2 py-0.5 text-xs font-medium">Pending</span>;
 }
 
@@ -65,7 +86,23 @@ function fmt(iso: string | null) {
   return new Date(iso).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
 }
 
-export function QueueClient({ websiteId, initialWebsite, initialUrls, initialPagination }: Props) {
+// Small window of page numbers around the current page, with ellipses —
+// pure display logic, no data fetching.
+function pageNumbers(current: number, total: number): (number | "…")[] {
+  const pages: (number | "…")[] = [];
+  const radius = 1;
+  for (let p = 1; p <= total; p++) {
+    if (p === 1 || p === total || (p >= current - radius && p <= current + radius)) {
+      pages.push(p);
+    } else if (pages[pages.length - 1] !== "…") {
+      pages.push("…");
+    }
+  }
+  return pages;
+}
+
+export function QueueClient({ websiteId, initialWebsite, initialUrls, initialPagination, statusCounts }: Props) {
+  const router = useRouter();
   const [urls, setUrls]               = useState<UrlRow[]>(initialUrls);
   const [pagination, setPagination]   = useState<Pagination>(initialPagination);
   const [gscFilter, setGscFilter]     = useState("all");
@@ -74,6 +111,10 @@ export function QueueClient({ websiteId, initialWebsite, initialUrls, initialPag
   const [searchInput, setSearchInput] = useState("");
   const [sitemapsOpen, setSitemapsOpen] = useState(false);
   const [isPending, startTransition]  = useTransition();
+  const [selected, setSelected]       = useState<Set<string>>(new Set());
+  const [bulkBusy, setBulkBusy]       = useState(false);
+  const [inspectRow, setInspectRow]   = useState<UrlRow | null>(null);
+  const [refreshingStatus, setRefreshingStatus] = useState(false);
 
   // Dispatch / resubmit ("no invented functionality" gap — Part B)
   const [engine, setEngine]           = useState<"gsc" | "bing">("gsc");
@@ -191,6 +232,62 @@ export function QueueClient({ websiteId, initialWebsite, initialUrls, initialPag
     streamDispatch(`/api/indexing-queue/${websiteId}/urls/${urlId}/resubmit`, { engine: urlEngine });
   }
 
+  function toggleSelected(urlId: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(urlId)) next.delete(urlId); else next.add(urlId);
+      return next;
+    });
+  }
+
+  function toggleSelectAll() {
+    setSelected((prev) => (prev.size === urls.length ? new Set() : new Set(urls.map((u) => u.id))));
+  }
+
+  // Bulk re-submit — reuses the existing per-row resubmit endpoint for each
+  // selected row against the currently chosen engine, sequentially.
+  async function bulkResubmitSelected() {
+    if (selected.size === 0) return;
+    setBulkBusy(true);
+    for (const urlId of Array.from(selected)) {
+      await fetch(`/api/indexing-queue/${websiteId}/urls/${urlId}/resubmit`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ engine }),
+      }).catch(() => {});
+    }
+    setBulkBusy(false);
+    setSelected(new Set());
+    fetchUrls(pagination.page, gscFilter, bingFilter, search);
+  }
+
+  function handleRefreshStatus() {
+    setRefreshingStatus(true);
+    router.refresh();
+    fetchUrls(pagination.page, gscFilter, bingFilter, search);
+    setTimeout(() => setRefreshingStatus(false), 600);
+  }
+
+  // Client-side only — serializes the currently loaded/filtered page of URLs.
+  // No backend touched.
+  function exportCsv() {
+    function cell(value: string): string {
+      return /[",\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
+    }
+    const header = ["URL", "Discovered", "GSC Status", "GSC Submitted", "GSC Error", "Bing Status", "Bing Submitted", "Bing Error"];
+    const rows = urls.map((u) => [
+      u.url, fmt(u.discoveredAt), u.gscStatus, fmt(u.gscSubmittedAt), u.gscError ?? "",
+      u.bingStatus, fmt(u.bingSubmittedAt), u.bingError ?? "",
+    ]);
+    const csv = [header, ...rows].map((row) => row.map(cell).join(",")).join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = `${initialWebsite.name.replace(/\s+/g, "-").toLowerCase()}-indexing-queue-${new Date().toISOString().slice(0, 10)}.csv`;
+    link.click();
+    URL.revokeObjectURL(link.href);
+  }
+
   async function submitNewUrl(e: React.FormEvent) {
     e.preventDefault();
     if (!newUrl.trim()) { setAddUrlError("Enter a URL."); return; }
@@ -235,9 +332,17 @@ export function QueueClient({ websiteId, initialWebsite, initialUrls, initialPag
         <Button size="sm" variant="outline" onClick={forceReindex} disabled={dispatchBusy}>
           <RotateCw className="h-3.5 w-3.5" /> Force Re-index All
         </Button>
-        <Button size="sm" variant="outline" className="ml-auto" onClick={() => setAddUrlOpen(true)}>
-          <Plus className="h-3.5 w-3.5" /> Add Single URL
+        <Button size="sm" variant="outline" onClick={handleRefreshStatus} disabled={refreshingStatus}>
+          <RotateCw className={`h-3.5 w-3.5 ${refreshingStatus ? "animate-spin" : ""}`} /> Refresh Status
         </Button>
+        <div className="ml-auto flex items-center gap-2">
+          <Button size="sm" variant="outline" onClick={() => setAddUrlOpen(true)}>
+            <Plus className="h-3.5 w-3.5" /> Add Single URL
+          </Button>
+          <Button size="sm" variant="outline" onClick={exportCsv}>
+            <Download className="h-3.5 w-3.5" /> Export CSV
+          </Button>
+        </div>
       </div>
 
       {dispatchOpen && (
@@ -250,22 +355,28 @@ export function QueueClient({ websiteId, initialWebsite, initialUrls, initialPag
           onClick={() => setSitemapsOpen((o) => !o)}
           className="w-full flex items-center justify-between px-4 py-3 bg-muted/50 hover:bg-muted transition-colors text-sm font-medium text-foreground"
         >
-          <span>Sitemaps ({initialWebsite.sitemapCount})</span>
+          <span>Sitemaps Discovered ({initialWebsite.sitemapCount})</span>
           {sitemapsOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
         </button>
         {sitemapsOpen && (
-          <div className="divide-y divide-border max-h-60 overflow-y-auto">
+          <div className="p-4">
             {initialWebsite.sitemaps.length === 0 ? (
-              <p className="px-4 py-3 text-sm text-muted-foreground">No sitemaps saved yet.</p>
+              <p className="text-sm text-muted-foreground">No sitemaps saved yet.</p>
             ) : (
-              initialWebsite.sitemaps.map((s, i) => (
-                <div key={i} className="flex items-center justify-between px-4 py-2 text-xs">
-                  <a href={s.url} target="_blank" rel="noreferrer" className="text-primary hover:underline truncate max-w-lg">
-                    {s.url}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 max-h-72 overflow-y-auto">
+                {initialWebsite.sitemaps.map((s, i) => (
+                  <a
+                    key={i}
+                    href={s.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="rounded-lg border border-border px-3 py-2.5 hover:bg-muted/40 transition-colors"
+                  >
+                    <p className="text-xs text-primary truncate">{s.url}</p>
+                    <p className="text-xs text-muted-foreground mt-1">Discovered {fmt(s.discoveredAt)}</p>
                   </a>
-                  <span className="text-muted-foreground ml-4 shrink-0">{fmt(s.discoveredAt)}</span>
-                </div>
-              ))
+                ))}
+              </div>
             )}
           </div>
         )}
@@ -290,11 +401,11 @@ export function QueueClient({ websiteId, initialWebsite, initialUrls, initialPag
         {/* GSC filter */}
         <div className="flex items-center gap-1.5 text-sm">
           <span className="text-muted-foreground text-xs font-medium">GSC:</span>
-          {STATUS_OPTIONS.map((o) => (
+          {statusOptions({ pending: statusCounts.gscPending, submitted: statusCounts.gscSubmitted, failed: statusCounts.gscFailed }).map((o) => (
             <button
               key={o.value}
               onClick={() => setGscFilter(o.value)}
-              className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors ${
+              className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors whitespace-nowrap ${
                 gscFilter === o.value
                   ? "bg-primary text-primary-foreground"
                   : "bg-muted text-muted-foreground hover:bg-muted/70"
@@ -308,11 +419,11 @@ export function QueueClient({ websiteId, initialWebsite, initialUrls, initialPag
         {/* Bing filter */}
         <div className="flex items-center gap-1.5 text-sm">
           <span className="text-muted-foreground text-xs font-medium">Bing:</span>
-          {STATUS_OPTIONS.map((o) => (
+          {statusOptions({ pending: statusCounts.bingPending, submitted: statusCounts.bingSubmitted, failed: statusCounts.bingFailed }).map((o) => (
             <button
               key={o.value}
               onClick={() => setBingFilter(o.value)}
-              className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors ${
+              className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors whitespace-nowrap ${
                 bingFilter === o.value
                   ? "bg-orange-500 text-white"
                   : "bg-muted text-muted-foreground hover:bg-muted/70"
@@ -328,6 +439,20 @@ export function QueueClient({ websiteId, initialWebsite, initialUrls, initialPag
         </span>
       </div>
 
+      {/* Bulk actions */}
+      {selected.size > 0 && (
+        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-primary/30 bg-primary/5 px-4 py-2.5">
+          <span className="text-xs font-medium text-foreground">{selected.size} selected</span>
+          <div className="flex items-center gap-2 sm:ml-auto">
+            <Button size="sm" variant="outline" onClick={bulkResubmitSelected} disabled={bulkBusy}>
+              {bulkBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCw className="h-3.5 w-3.5" />}
+              Bulk Re-submit Selected ({engine === "gsc" ? "GSC" : "Bing"})
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => setSelected(new Set())}>Clear</Button>
+          </div>
+        </div>
+      )}
+
       {/* URL table */}
       <div className={`rounded-xl border border-border overflow-x-auto bg-card transition-opacity ${isPending ? "opacity-50" : ""}`}>
         {urls.length === 0 ? (
@@ -336,17 +461,36 @@ export function QueueClient({ websiteId, initialWebsite, initialUrls, initialPag
           <table className="w-full text-sm">
             <thead className="bg-muted/50 border-b border-border">
               <tr>
+                <th className="px-4 py-3 w-8">
+                  <input
+                    type="checkbox"
+                    checked={selected.size === urls.length}
+                    onChange={toggleSelectAll}
+                    className="h-3.5 w-3.5 rounded border-input"
+                    aria-label="Select all URLs on this page"
+                  />
+                </th>
                 <th className="text-left px-4 py-3 font-medium text-muted-foreground">URL</th>
                 <th className="text-center px-3 py-3 font-medium text-muted-foreground whitespace-nowrap">Discovered</th>
                 <th className="text-center px-3 py-3 font-medium text-muted-foreground">GSC</th>
                 <th className="text-center px-3 py-3 font-medium text-muted-foreground whitespace-nowrap">GSC Date</th>
                 <th className="text-center px-3 py-3 font-medium text-muted-foreground">Bing</th>
                 <th className="text-center px-3 py-3 font-medium text-muted-foreground whitespace-nowrap">Bing Date</th>
+                <th className="text-center px-3 py-3 font-medium text-muted-foreground">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
               {urls.map((row) => (
                 <tr key={row.id} className="hover:bg-muted/40 transition-colors">
+                  <td className="px-4 py-2.5">
+                    <input
+                      type="checkbox"
+                      checked={selected.has(row.id)}
+                      onChange={() => toggleSelected(row.id)}
+                      className="h-3.5 w-3.5 rounded border-input"
+                      aria-label={`Select ${row.url}`}
+                    />
+                  </td>
                   <td className="px-4 py-2.5">
                     <a
                       href={row.url}
@@ -366,7 +510,7 @@ export function QueueClient({ websiteId, initialWebsite, initialUrls, initialPag
                   <td className="px-3 py-2.5 text-center text-xs text-muted-foreground whitespace-nowrap">{fmt(row.discoveredAt)}</td>
                   <td className="px-3 py-2.5 text-center">
                     <div className="flex items-center justify-center gap-1">
-                      {statusBadge(row.gscStatus)}
+                      {statusBadge(row.gscStatus, row.gscError)}
                       {row.gscStatus === "failed" && (
                         <button
                           onClick={() => resubmitOne(row.id, "gsc")}
@@ -382,7 +526,7 @@ export function QueueClient({ websiteId, initialWebsite, initialUrls, initialPag
                   <td className="px-3 py-2.5 text-center text-xs text-muted-foreground whitespace-nowrap">{fmt(row.gscSubmittedAt)}</td>
                   <td className="px-3 py-2.5 text-center">
                     <div className="flex items-center justify-center gap-1">
-                      {statusBadge(row.bingStatus)}
+                      {statusBadge(row.bingStatus, row.bingError)}
                       {row.bingStatus === "failed" && (
                         <button
                           onClick={() => resubmitOne(row.id, "bing")}
@@ -396,6 +540,15 @@ export function QueueClient({ websiteId, initialWebsite, initialUrls, initialPag
                     </div>
                   </td>
                   <td className="px-3 py-2.5 text-center text-xs text-muted-foreground whitespace-nowrap">{fmt(row.bingSubmittedAt)}</td>
+                  <td className="px-3 py-2.5 text-center">
+                    <button
+                      onClick={() => setInspectRow(row)}
+                      title="Inspect"
+                      className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-primary"
+                    >
+                      <Eye className="h-3.5 w-3.5" /> Inspect
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -409,7 +562,7 @@ export function QueueClient({ websiteId, initialWebsite, initialUrls, initialPag
           <span className="text-muted-foreground text-xs">
             Page {pagination.page} of {pagination.totalPages} ({pagination.total.toLocaleString()} total)
           </span>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1">
             <button
               disabled={pagination.page <= 1}
               onClick={() => fetchUrls(pagination.page - 1, gscFilter, bingFilter, search)}
@@ -417,6 +570,23 @@ export function QueueClient({ websiteId, initialWebsite, initialUrls, initialPag
             >
               <ChevronLeft className="h-4 w-4" />
             </button>
+            {pageNumbers(pagination.page, pagination.totalPages).map((p, i) =>
+              p === "…" ? (
+                <span key={`ellipsis-${i}`} className="px-1.5 text-xs text-muted-foreground">…</span>
+              ) : (
+                <button
+                  key={p}
+                  onClick={() => fetchUrls(p, gscFilter, bingFilter, search)}
+                  className={`min-w-[2rem] px-2 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                    p === pagination.page
+                      ? "bg-primary text-primary-foreground"
+                      : "border border-input hover:bg-muted"
+                  }`}
+                >
+                  {p}
+                </button>
+              )
+            )}
             <button
               disabled={pagination.page >= pagination.totalPages}
               onClick={() => fetchUrls(pagination.page + 1, gscFilter, bingFilter, search)}
@@ -427,6 +597,46 @@ export function QueueClient({ websiteId, initialWebsite, initialUrls, initialPag
           </div>
         </div>
       )}
+
+      {/* Inspect dialog */}
+      <Dialog open={!!inspectRow} onOpenChange={(o) => !o && setInspectRow(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Inspect URL</DialogTitle>
+            <DialogDescription className="break-all">{inspectRow?.url}</DialogDescription>
+          </DialogHeader>
+          {inspectRow && (
+            <div className="space-y-2 text-sm">
+              <div className="flex justify-between gap-4">
+                <span className="text-muted-foreground">Discovered</span>
+                <span className="text-foreground">{fmt(inspectRow.discoveredAt)}</span>
+              </div>
+              <div className="flex justify-between gap-4">
+                <span className="text-muted-foreground">GSC Status</span>
+                {statusBadge(inspectRow.gscStatus, inspectRow.gscError)}
+              </div>
+              <div className="flex justify-between gap-4">
+                <span className="text-muted-foreground">GSC Submitted</span>
+                <span className="text-foreground">{fmt(inspectRow.gscSubmittedAt)}</span>
+              </div>
+              {inspectRow.gscError && (
+                <p className="text-xs text-rose-600 dark:text-rose-400">GSC error: {inspectRow.gscError}</p>
+              )}
+              <div className="flex justify-between gap-4 pt-2 border-t border-border">
+                <span className="text-muted-foreground">Bing Status</span>
+                {statusBadge(inspectRow.bingStatus, inspectRow.bingError)}
+              </div>
+              <div className="flex justify-between gap-4">
+                <span className="text-muted-foreground">Bing Submitted</span>
+                <span className="text-foreground">{fmt(inspectRow.bingSubmittedAt)}</span>
+              </div>
+              {inspectRow.bingError && (
+                <p className="text-xs text-rose-600 dark:text-rose-400">Bing error: {inspectRow.bingError}</p>
+              )}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
 
       {/* Add Single URL dialog */}
       <Dialog open={addUrlOpen} onOpenChange={(o) => { setAddUrlOpen(o); if (!o) { setNewUrl(""); setAddUrlError(""); } }}>

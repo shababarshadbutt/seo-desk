@@ -12,8 +12,8 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
-import { DAILY_TASK_CATEGORIES } from "@/lib/daily-task-categories";
-import { fakeIpAndWorkstation, fakeShiftDurationMinutes, formatShiftDuration, fakeDailyStats } from "@/lib/daily-report-fake-metadata";
+import { DAILY_TASK_CATEGORIES, DAILY_TASK_CATEGORY_COLORS } from "@/lib/daily-task-categories";
+import { fakeIpAndWorkstation, fakeShiftDurationMinutes, formatShiftDuration, fakeDailyStats, userColor, fakeEntryTag } from "@/lib/daily-report-fake-metadata";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -144,6 +144,19 @@ export function ReportsClient({ reports: initial, currentUserId, viewerRole, mem
     );
   }, [allTasks, filterCategory]);
 
+  // Per-entry task lookup — same join as categoryKeySet, keyed by
+  // userId+date, used to show real category tags on each report card.
+  const tasksByEntry = useMemo(() => {
+    const map = new Map<string, DailyTaskRow[]>();
+    for (const t of allTasks) {
+      const key = `${t.userId}-${t.date.slice(0, 10)}`;
+      const list = map.get(key);
+      if (list) list.push(t);
+      else map.set(key, [t]);
+    }
+    return map;
+  }, [allTasks]);
+
   // Part D placeholder stats — deterministic per day (not random-per-render),
   // no real data source. See docs/design/screens/daily-reports.md "Known
   // Placeholders" for the full tracked list.
@@ -225,7 +238,7 @@ export function ReportsClient({ reports: initial, currentUserId, viewerRole, mem
           {canSeeMembers && (
             <Button variant="outline" onClick={() => setReportSheetOpen(true)}>
               <Sheet className="h-4 w-4" />
-              Report Sheet
+              Live Report Sheet
             </Button>
           )}
           <Button variant="outline" asChild>
@@ -378,6 +391,7 @@ export function ReportsClient({ reports: initial, currentUserId, viewerRole, mem
               onEdit={() => setEditItem(r)}
               onDelete={() => setDeleteId(r.id)}
               title={titleMap[r.userId]?.title}
+              entryTasks={tasksByEntry.get(`${r.userId}-${r.date.slice(0, 10)}`) ?? []}
             />
           ))}
 
@@ -491,23 +505,33 @@ function RichStatCard({
     amber:   "bg-amber-500/10 text-amber-600 dark:text-amber-400",
   }[color];
 
+  // Dark mode gets Stitch's more saturated, tinted card treatment (tinted
+  // background + colored border) instead of the light mode's plain white
+  // card — a per-card accent, scoped to this screen for now.
+  const cardTintClass = {
+    primary: "dark:bg-primary/10 dark:border-primary/30",
+    emerald: "dark:bg-emerald-500/10 dark:border-emerald-500/30",
+    sky:     "dark:bg-sky-500/10 dark:border-sky-500/30",
+    amber:   "dark:bg-amber-500/10 dark:border-amber-500/30",
+  }[color];
+
   return (
-    <div className="rounded-xl border bg-card p-4 space-y-3">
+    <div className={cn("rounded-xl border bg-card p-4 space-y-3", cardTintClass)}>
       <div className="flex items-start justify-between gap-2">
-        <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">{label}</p>
+        <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide dark:tracking-wider">{label}</p>
         <div className={cn("rounded-lg p-2 shrink-0", colorClass)}>
           <Icon className="h-4 w-4" />
         </div>
       </div>
 
       <div className="flex items-baseline gap-2 flex-wrap">
-        <p className="text-3xl font-bold leading-none">{value.toLocaleString()}</p>
-        {subLabel && <span className="text-xs text-muted-foreground">{subLabel}</span>}
+        <p className="text-3xl font-bold leading-none dark:font-mono dark:tabular-nums">{value.toLocaleString()}</p>
+        {subLabel && <span className="text-xs text-muted-foreground dark:font-mono">{subLabel}</span>}
         {delta && (
           <span
             title={delta.fake ? "Placeholder — not backed by real data yet" : undefined}
             className={cn(
-              "inline-flex items-center gap-0.5 text-xs font-medium",
+              "inline-flex items-center gap-0.5 text-xs font-medium dark:font-mono",
               delta.positive ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"
             )}
           >
@@ -522,7 +546,7 @@ function RichStatCard({
         {subMetrics.map((m) => (
           <div key={m.label} title={m.fake ? "Placeholder — not backed by real data yet" : undefined}>
             <p className="text-muted-foreground">{m.label}</p>
-            <p className="font-semibold flex items-center gap-1">
+            <p className="font-semibold flex items-center gap-1 dark:font-mono">
               {m.value}
               {m.fake && <span className="h-1 w-1 rounded-full bg-muted-foreground/50" />}
             </p>
@@ -653,6 +677,27 @@ function TodaysTasksCard({ currentUserId }: { currentUserId: string }) {
 
 // ─── Report Card ──────────────────────────────────────────────────────────────
 
+// Shared avatar/title-pill color classes, keyed by the deterministic
+// per-user color from lib/daily-report-fake-metadata.ts#userColor.
+const USER_COLOR_CLASSES: Record<string, { avatar: string; pill: string }> = {
+  rose:    { avatar: "bg-rose-500/10 text-rose-700 dark:text-rose-400",       pill: "border-rose-400/30 bg-rose-500/10 text-rose-700 dark:text-rose-400" },
+  sky:     { avatar: "bg-sky-500/10 text-sky-700 dark:text-sky-400",         pill: "border-sky-400/30 bg-sky-500/10 text-sky-700 dark:text-sky-400" },
+  amber:   { avatar: "bg-amber-500/10 text-amber-700 dark:text-amber-400",    pill: "border-amber-400/30 bg-amber-500/10 text-amber-700 dark:text-amber-400" },
+  emerald: { avatar: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400", pill: "border-emerald-400/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400" },
+  violet:  { avatar: "bg-violet-500/10 text-violet-700 dark:text-violet-400", pill: "border-violet-400/30 bg-violet-500/10 text-violet-700 dark:text-violet-400" },
+  cyan:    { avatar: "bg-cyan-500/10 text-cyan-700 dark:text-cyan-400",       pill: "border-cyan-400/30 bg-cyan-500/10 text-cyan-700 dark:text-cyan-400" },
+};
+
+// Category tag pill colors, keyed by DAILY_TASK_CATEGORY_COLORS values.
+const TAG_COLOR_CLASSES: Record<string, string> = {
+  sky:     "border-sky-400/30 bg-sky-500/10 text-sky-700 dark:text-sky-400",
+  violet:  "border-violet-400/30 bg-violet-500/10 text-violet-700 dark:text-violet-400",
+  amber:   "border-amber-400/30 bg-amber-500/10 text-amber-700 dark:text-amber-400",
+  emerald: "border-emerald-400/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
+  rose:    "border-rose-400/30 bg-rose-500/10 text-rose-700 dark:text-rose-400",
+  muted:   "border-border bg-muted/50 text-muted-foreground",
+};
+
 function reportTime(iso: string) {
   return new Date(iso).toLocaleTimeString("en-US", { timeZone: PKT, hour: "2-digit", minute: "2-digit" });
 }
@@ -665,7 +710,7 @@ function relativeArchiveLabel(dateStr: string) {
 }
 
 function ReportCard({
-  report, showMember, canManage, onEdit, onDelete, title,
+  report, showMember, canManage, onEdit, onDelete, title, entryTasks,
 }: {
   report: DailyReportRow;
   showMember: boolean;
@@ -673,6 +718,7 @@ function ReportCard({
   onEdit: () => void;
   onDelete: () => void;
   title?: string;
+  entryTasks: DailyTaskRow[];
 }) {
   const [expanded, setExpanded] = useState(false);
   const isLong = report.report.length > 200;
@@ -683,13 +729,23 @@ function ReportCard({
   const tasksExecuted = report.report.split("\n").filter((l) => l.trim()).length;
   const { ip, workstation } = fakeIpAndWorkstation(report.id);
   const shiftMinutes = fakeShiftDurationMinutes(report.id);
+  const userColorClasses = USER_COLOR_CLASSES[userColor(report.userId)];
+
+  // Category tags: real when this member logged a tagged Today's Task for
+  // this date, otherwise one clearly-flagged placeholder tag — see
+  // lib/daily-report-fake-metadata.ts#fakeEntryTag and the "Known
+  // Placeholders" list in docs/design/screens/daily-reports.md.
+  const realCategories = Array.from(new Set(entryTasks.map((t) => t.category)));
+  const isRealTag = realCategories.length > 0;
+  const tags = isRealTag ? realCategories : [fakeEntryTag(report.id)];
+  const backlinksLive = entryTasks.filter((t) => t.category === "Backlink Outreach").length;
 
   return (
     <div className="rounded-xl border bg-card shadow-sm p-4 space-y-3">
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-center gap-3">
           {showMember && (
-            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10 text-xs font-bold shrink-0">
+            <div className={cn("flex h-8 w-8 items-center justify-center rounded-full text-xs font-bold shrink-0", userColorClasses.avatar)}>
               {initials(report.userName)}
             </div>
           )}
@@ -712,10 +768,12 @@ function ReportCard({
               <span>{formatDate(report.date)}</span>
               <span>•</span>
               <span>{reportTime(report.createdAt)}</span>
-              {showMember && (
+              {showMember && title && (
                 <>
                   <span>•</span>
-                  {title && <span className="text-primary/70">{title}</span>}
+                  <span className={cn("inline-flex items-center rounded-full border px-1.5 py-0.5 text-[10px] font-medium", userColorClasses.pill)}>
+                    {title}
+                  </span>
                 </>
               )}
             </p>
@@ -733,8 +791,25 @@ function ReportCard({
         )}
       </div>
 
-      <div className="text-sm whitespace-pre-wrap leading-relaxed text-foreground/90">
-        {preview}
+      <div className="flex items-start justify-between gap-3 flex-wrap sm:flex-nowrap">
+        <div className="text-sm whitespace-pre-wrap leading-relaxed text-foreground/90 flex-1 min-w-[200px]">
+          {preview}
+        </div>
+        <div className="flex flex-row sm:flex-col gap-1.5 shrink-0 flex-wrap sm:items-end">
+          {tags.map((tag) => (
+            <span
+              key={tag}
+              title={isRealTag ? undefined : "Placeholder — not backed by real data yet"}
+              className={cn(
+                "inline-flex items-center gap-1 whitespace-nowrap rounded-full border px-2 py-0.5 text-[10px] font-medium",
+                TAG_COLOR_CLASSES[isRealTag ? DAILY_TASK_CATEGORY_COLORS[tag as keyof typeof DAILY_TASK_CATEGORY_COLORS] ?? "muted" : "muted"]
+              )}
+            >
+              {tag}
+              {!isRealTag && <span className="h-1 w-1 rounded-full bg-muted-foreground/50" />}
+            </span>
+          ))}
+        </div>
       </div>
 
       {isLong && (
@@ -746,12 +821,15 @@ function ReportCard({
         </button>
       )}
 
-      {/* Footer metadata — mix of real (tasks executed, submission id, shift-ended
-          time) and placeholder (backlinks/rfqs pills, IP/workstation, shift
-          duration) data, per the Known Placeholders list. */}
+      {/* Footer metadata — mix of real (tasks executed, backlinks live,
+          submission id, shift-ended time) and placeholder (IP/workstation,
+          shift duration) data, per the Known Placeholders list. */}
       <div className="border-t pt-2 flex items-center justify-between gap-2 flex-wrap text-xs">
         <div className="flex items-center gap-1.5 flex-wrap">
           <span className="rounded-full border px-2 py-0.5 bg-muted/40">{tasksExecuted} Tasks Executed</span>
+          <span className="rounded-full border px-2 py-0.5 bg-muted/40" title="Real — count of this member's Today's Tasks entries tagged Backlink Outreach for this date">
+            {backlinksLive} Backlinks Live
+          </span>
         </div>
         <span className="text-muted-foreground font-mono text-[11px]" title="Real — this record's own id">
           <Hash className="h-3 w-3 inline -mt-0.5" />DR-{report.id.slice(-6).toUpperCase()}
