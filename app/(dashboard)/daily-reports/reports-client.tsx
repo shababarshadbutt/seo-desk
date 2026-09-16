@@ -13,7 +13,6 @@ import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { DAILY_TASK_CATEGORIES } from "@/lib/daily-task-categories";
-import { fakeTitleForUser } from "@/lib/daily-report-fake-titles";
 import { fakeIpAndWorkstation, fakeShiftDurationMinutes, formatShiftDuration, fakeDailyStats } from "@/lib/daily-report-fake-metadata";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -149,6 +148,20 @@ export function ReportsClient({ reports: initial, currentUserId, viewerRole, mem
   // no real data source. See docs/design/screens/daily-reports.md "Known
   // Placeholders" for the full tracked list.
   const fakeDayStats = useMemo(() => fakeDailyStats(todayPKT()), []);
+
+  // Part F — job titles moved from a pure client-side fake to a real,
+  // separate UserProfile collection (auto-seeded with a placeholder, editable
+  // later). Fetched once for every distinct member in view.
+  const [titleMap, setTitleMap] = useState<Record<string, { title: string; isPlaceholder: boolean }>>({});
+  useEffect(() => {
+    const userIds = Array.from(new Set(reports.map((r) => r.userId)));
+    if (userIds.length === 0) return;
+    fetch(`/api/user-profiles?userIds=${userIds.join(",")}`)
+      .then((res) => (res.ok ? res.json() : {}))
+      .then(setTitleMap)
+      .catch(() => setTitleMap({}));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reports.length]);
 
   const canManage = (r: DailyReportRow) =>
     viewerRole === "super-admin" || r.userId === currentUserId;
@@ -364,6 +377,7 @@ export function ReportsClient({ reports: initial, currentUserId, viewerRole, mem
               canManage={canManage(r)}
               onEdit={() => setEditItem(r)}
               onDelete={() => setDeleteId(r.id)}
+              title={titleMap[r.userId]?.title}
             />
           ))}
 
@@ -651,13 +665,14 @@ function relativeArchiveLabel(dateStr: string) {
 }
 
 function ReportCard({
-  report, showMember, canManage, onEdit, onDelete,
+  report, showMember, canManage, onEdit, onDelete, title,
 }: {
   report: DailyReportRow;
   showMember: boolean;
   canManage: boolean;
   onEdit: () => void;
   onDelete: () => void;
+  title?: string;
 }) {
   const [expanded, setExpanded] = useState(false);
   const isLong = report.report.length > 200;
@@ -700,7 +715,7 @@ function ReportCard({
               {showMember && (
                 <>
                   <span>•</span>
-                  <span className="text-primary/70">{fakeTitleForUser(report.userId)}</span>
+                  {title && <span className="text-primary/70">{title}</span>}
                 </>
               )}
             </p>

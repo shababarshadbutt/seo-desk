@@ -16,7 +16,7 @@ Dark: `74e64e71980748468c447a05ac6af73c` ("SEO TeamDesk - Weekly Reports (Dark M
 
 Single unambiguous Light/Dark pair — Hard Gate 2 not triggered.
 
-**Scope note**: the Stitch mock includes an "Executive Summary" AI button, bar/donut charts, and "Export CSV/PDF" — none of these exist in the current implementation (no charting library in use anywhere in the app, no AI endpoint, no export route for this screen). Per "No invented functionality", none of these were built. Stitch was used for the header/filter-bar/card layout language, color-coded totals, and collapsible member/month section styling only.
+**Scope note (superseded — see Part F below)**: originally the Stitch mock's AI button, bar/donut charts, and CSV/PDF export weren't built. Since then: the bar chart, CSV export, and a stubbed AI button were built (Part B); the donut chart and the rest of the richer mock were built in Part F.
 
 ---
 
@@ -47,3 +47,41 @@ Related presentation: `components/ui/{button,input,label,dialog}.tsx`
   - Missing `key` prop on a `<>` Fragment wrapping each week's rows in `MonthSection` (real pre-existing React console error, unrelated to styling — fixed by converting to `<Fragment key={weekStart}>` since I was already touching this exact block for the styling/accessibility fix).
   - No `DialogDescription` on any of the 3 dialogs (Add/Edit/Delete) — added, consistent with the app-wide pattern established in Phase 4.
 - **Real API calls**: `POST /api/weekly-reports`, `PATCH /api/weekly-reports/:id`, `DELETE /api/weekly-reports/:id` — protected, consumed only.
+
+---
+
+# Part F — Pixel-fidelity redesign (exact Stitch match + real structure for placeholders, 2026-09-16)
+
+Same situation as Daily Reports (Part D) and Login (Part E): the user shared real Stitch screenshots (two variants) plus the current live screen, and asked for the missing pieces — specifically the donut chart and richer stat cards. This time, with an important upgrade to the approach: **rather than purely client-side computed placeholders, every concept with no real data source got a real schema, a real collection, and a real editable API route — seeded with a placeholder value.** The user's own words: *"if there is need of schema for that make that schema and functionality in the backend and DB and add some fake values so after the deployment we can add some real values so if the structure is there then it will be easy to add values."*
+
+## New backend (all new files — zero existing protected file touched)
+
+- **`lib/mongodb/models/UserProfile.ts`** + **`app/api/user-profiles/route.ts`** (bulk `GET ?userIds=`, auto-seeds missing profiles) + **`app/api/user-profiles/[userId]/route.ts`** (`PATCH { title }`, super-admin or self). One doc per user; job title, seeded from `lib/fake-user-titles.ts` (renamed from Daily Reports' Part D file — the same generic generator, now used for both screens via this shared collection instead of two independent client-side fakes).
+- **`lib/mongodb/models/WebsiteProfile.ts`** + **`app/api/website-profiles/route.ts`** (bulk `GET ?websiteIds=`, auto-seeds) + **`app/api/website-profiles/[websiteId]/route.ts`** (`PATCH { industry }`, super-admin only). One doc per website; industry vertical, seeded from `lib/fake-website-industries.ts` — pool chosen to match this app's real, overwhelmingly aviation/aerospace-parts-supply-chain dataset (Aerospace & Defense, Fasteners & Hardware, Electromechanical Parts, Commercial MRO, Industrial Supply, Electronics & Avionics), and matching Stitch's own industry labels.
+- **`lib/mongodb/models/ReportMetricsConfig.ts`** + **`app/api/report-metrics-config/route.ts`** (`GET` auto-creates the singleton with seed values; `PATCH`, super-admin only, partial update). Same singleton pattern as the existing, protected `Settings` model, in a new file: `weeklyClickTarget` (seed 3000), `serpVisibilityIndex` (seed 94.8), `verifiedUrlRatio` (seed 98.4), `avgValuePerQuote` (seed 14250).
+
+Every one of these is a genuinely real, working CRUD path — not a display-only fake. Verified live: a real `PATCH /api/report-metrics-config` edit was made through the new "Edit target/index values" UI, confirmed to persist (`isPlaceholder` flipped from `true` to `false`), then reverted to the seed number afterward (the flag correctly stayed `false`, since a real edit action occurred — reverting the number doesn't un-happen the edit).
+
+## What's real vs. placeholder-with-real-structure
+
+| Element | Status | Backing |
+|---|---|---|
+| 4 stat cards (Total Clicks/Impressions/Indexation/RFQs) | **REAL** | Sums over the same rows already driving the chart, no schema needed |
+| Stat card trend deltas | **REAL** | First-half vs second-half of the visible 12-week window, real % change |
+| "Managed Domains" | **REAL** | Distinct `websiteId` count in view |
+| "Weekly Target/Achieved", "SERP Visibility Index", "Verified URL Ratio", "Avg Value/Quote" | **Real structure, seeded value** | `ReportMetricsConfig`, editable via the new in-page dialog |
+| "RFQ Industry Breakdown" donut + legend + center total | **Real structure, seeded value** | Groups visible rows by each website's `WebsiteProfile.industry` |
+| "Top Performer: {industry} +N% conversion" | **REAL** | Top industry segment's real `rfqs/clicks` |
+| Bar chart "Top Contributor" / "Conversion Rate" | **REAL** | Real arithmetic over visible rows |
+| "Executive Visuals" / "Detailed Breakdown" tabs | **REAL** | Toggles stat-cards+charts vs. the existing drill-down table |
+| Reset Filters | **REAL** | Clears member/month state |
+| Per-member job title | **Real structure, seeded value** | `UserProfile.title`, editable per-user |
+| Per-member "N Websites Assigned" | **REAL** | Distinct `websiteId` count for that member's visible rows |
+| Sidebar/topbar, breadcrumb, "Sync Engine" pill, ⌘K search styling | **Out of scope** | Shared dashboard shell, same decision as Parts D/E |
+
+## Files touched
+- New: 3 models, 5 routes, 2 lib files (`lib/fake-website-industries.ts`; `lib/fake-user-titles.ts` is a rename of Daily Reports' Part D `lib/daily-report-fake-titles.ts`, now shared).
+- Rewritten (not protected): `app/(dashboard)/weekly-reports/weekly-reports-client.tsx`.
+- Extended (not protected): `app/(dashboard)/weekly-reports/page.tsx` (passes `updatedAt` through); `app/(dashboard)/daily-reports/reports-client.tsx` (migrated from the old client-side-only fake title to the new shared `UserProfile` fetch, so both screens now show the same real, DB-backed title per person instead of two independently-computed fakes).
+
+Verified live: tsc/lint/build clean, protected-file guard clean (every backend file new), real stat totals/deltas/donut cross-checked, a real config edit persisted and reverted correctly, Daily Reports re-confirmed unaffected after the title-source migration (same titles render, now DB-backed), existing Add/Edit/Delete/Export/AI-stub flows all re-confirmed working, 0 console errors across desktop/tablet/mobile × Light/Dark.

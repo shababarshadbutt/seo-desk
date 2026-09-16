@@ -55,6 +55,7 @@ export default async function WeeklyReportsPage() {
     indexation:  r.indexation  ?? 0,
     rfqs:        r.rfqs        ?? 0,
     createdAt:   r.createdAt.toISOString(),
+    updatedAt:   r.updatedAt.toISOString(),
   }));
 
   return (
