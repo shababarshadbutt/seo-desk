@@ -252,13 +252,13 @@ export function SitemapCleanerClient() {
   return (
     <div className="space-y-6 max-w-3xl">
       {error && (
-        <div className="rounded-md border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+        <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
           {error}
         </div>
       )}
 
       {/* Settings */}
-      <div className="rounded-lg border bg-card p-6 shadow-sm space-y-4">
+      <div className="rounded-xl border border-border bg-card p-6 shadow-sm space-y-4">
         <div>
           <h3 className="font-semibold">Settings</h3>
           <p className="text-sm text-muted-foreground">Only URLs belonging to this domain are kept.</p>
@@ -286,13 +286,13 @@ export function SitemapCleanerClient() {
       </div>
 
       {/* Source */}
-      <div className="rounded-lg border bg-card p-6 shadow-sm space-y-4">
+      <div className="rounded-xl border border-border bg-card p-6 shadow-sm space-y-4">
         <div>
           <h3 className="font-semibold">Source</h3>
           <p className="text-sm text-muted-foreground">Choose where the sitemap files come from.</p>
         </div>
 
-        <div className="flex flex-wrap rounded-md border p-1 bg-muted/40 w-fit">
+        <div className="flex flex-wrap rounded-lg border border-border p-1 bg-muted/40 w-fit">
           <TabButton active={sourceTab === "upload"} onClick={() => switchSourceTab("upload")} icon={<Upload className="h-4 w-4" />}>
             Upload
           </TabButton>
@@ -317,7 +317,7 @@ export function SitemapCleanerClient() {
               accept=".xml"
               multiple
               onChange={(e) => setFileCount(e.target.files?.length ?? 0)}
-              className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm file:mr-3 file:rounded file:border-0 file:bg-muted file:px-2 file:py-1 file:text-xs"
+              className="flex h-10 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm file:mr-3 file:rounded-md file:border-0 file:bg-muted file:px-2 file:py-1 file:text-xs"
             />
             {fileCount > 0 && <p className="text-sm text-muted-foreground">{fileCount} file(s) selected</p>}
           </div>
@@ -328,7 +328,7 @@ export function SitemapCleanerClient() {
             <Label htmlFor="domain-select">Domain</Label>
             <select
               id="domain-select"
-              className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm disabled:opacity-50"
+              className="flex h-10 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm disabled:opacity-50"
               value={selectedDomain}
               onChange={(e) => {
                 setSelectedDomain(e.target.value);
@@ -379,13 +379,13 @@ export function SitemapCleanerClient() {
       </div>
 
       {/* Output */}
-      <div className="rounded-lg border bg-card p-6 shadow-sm space-y-4">
+      <div className="rounded-xl border border-border bg-card p-6 shadow-sm space-y-4">
         <div>
           <h3 className="font-semibold">Output</h3>
           <p className="text-sm text-muted-foreground">Choose what happens with the cleaned files.</p>
         </div>
 
-        <div className="flex rounded-md border p-1 bg-muted/40 w-fit">
+        <div className="flex rounded-lg border border-border p-1 bg-muted/40 w-fit">
           <TabButton active={outputTab === "zip"} onClick={() => setOutputTab("zip")} icon={<Download className="h-4 w-4" />}>
             Download ZIP
           </TabButton>
@@ -442,7 +442,7 @@ function TabButton({
       type="button"
       onClick={onClick}
       className={cn(
-        "flex items-center gap-1.5 rounded px-3 py-1.5 text-sm font-medium transition-colors",
+        "flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors",
         active ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
       )}
     >

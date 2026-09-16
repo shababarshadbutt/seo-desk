@@ -32,7 +32,7 @@ export default async function SettingsPage() {
   }));
 
   return (
-    <div className="space-y-6 max-w-2xl">
+    <div className="space-y-6 max-w-5xl">
       <div>
         <h2 className="text-2xl font-bold">Settings</h2>
         <p className="text-sm text-muted-foreground mt-1">

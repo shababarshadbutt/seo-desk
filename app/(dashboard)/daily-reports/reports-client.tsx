@@ -2,12 +2,13 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Pencil, Trash2, Loader2, ChevronDown, ChevronUp, CalendarDays, ChevronLeft, ChevronRight, Sheet } from "lucide-react";
+import { Plus, Pencil, Trash2, Loader2, ChevronDown, ChevronUp, CalendarDays, ChevronLeft, ChevronRight, Sheet, ClipboardList, Link2, Send, FileCheck2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
+import { DAILY_TASK_CATEGORIES } from "@/lib/daily-task-categories";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -26,6 +27,24 @@ interface Props {
   currentUserId: string;
   viewerRole: string;
   members: { id: string; name: string }[];
+}
+
+interface DailyReportStats {
+  submittedToday: number;
+  liveBacklinksPlaced: number;
+  gscBingDispatched: number | null;
+  rfqsGenerated: number;
+}
+
+export interface DailyTaskRow {
+  id: string;
+  userId: string;
+  userName: string;
+  date: string;
+  text: string;
+  category: string;
+  status: "pending" | "in-progress" | "done";
+  createdAt: string;
 }
 
 const PKT = "Asia/Karachi";
@@ -61,6 +80,15 @@ export function ReportsClient({ reports: initial, currentUserId, viewerRole, mem
   const [filterMember, setFilterMember] = useState("");
   const [filterFrom,   setFilterFrom]   = useState("");
   const [filterTo,     setFilterTo]     = useState("");
+
+  // Stat cards (Part C addition)
+  const [stats, setStats] = useState<DailyReportStats | null>(null);
+  useEffect(() => {
+    fetch(`/api/daily-reports/stats?date=${todayPKT()}`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then(setStats)
+      .catch(() => setStats(null));
+  }, []);
 
   const canManage = (r: DailyReportRow) =>
     viewerRole === "super-admin" || r.userId === currentUserId;
@@ -131,14 +159,31 @@ export function ReportsClient({ reports: initial, currentUserId, viewerRole, mem
         </div>
       </div>
 
+      {/* ── Stat cards ── */}
+      {stats && (
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <StatCard icon={ClipboardList} color="primary" value={stats.submittedToday} label="Submitted Today" />
+          <StatCard icon={Link2} color="emerald" value={stats.liveBacklinksPlaced} label="Live Backlinks Placed" />
+          {stats.gscBingDispatched !== null && (
+            <StatCard icon={Send} color="sky" value={stats.gscBingDispatched} label="GSC/Bing Dispatched" />
+          )}
+          <StatCard icon={FileCheck2} color="amber" value={stats.rfqsGenerated} label="RFQs Generated" />
+        </div>
+      )}
+
+      {/* ── Today's Tasks (Part C addition — additive, alongside the freeform report below) ── */}
+      {viewerRole !== "super-admin" && (
+        <TodaysTasksCard currentUserId={currentUserId} />
+      )}
+
       {/* ── Today's report banner ── */}
       {todayReport && viewerRole !== "super-admin" && (
-        <div className="rounded-lg border border-green-200 bg-green-50 px-4 py-3 flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2 text-sm text-green-800">
+        <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2 text-sm text-emerald-700 dark:text-emerald-400">
             <CalendarDays className="h-4 w-4 shrink-0" />
             <span>You have already submitted a report for today.</span>
           </div>
-          <Button size="sm" variant="outline" className="shrink-0 border-green-300 text-green-800 hover:bg-green-100"
+          <Button size="sm" variant="outline" className="shrink-0 border-emerald-500/40 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-500/10"
             onClick={() => setEditItem(todayReport)}>
             <Pencil className="h-3.5 w-3.5" /> Edit
           </Button>
@@ -154,7 +199,7 @@ export function ReportsClient({ reports: initial, currentUserId, viewerRole, mem
               <select
                 value={filterMember}
                 onChange={(e) => setFilterMember(e.target.value)}
-                className="h-9 rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className="h-9 rounded-lg border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 <option value="">All members</option>
                 {members.map((m) => (
@@ -166,12 +211,12 @@ export function ReportsClient({ reports: initial, currentUserId, viewerRole, mem
           <div className="space-y-1">
             <Label className="text-xs text-muted-foreground">From</Label>
             <input type="date" value={filterFrom} onChange={(e) => setFilterFrom(e.target.value)}
-              className="h-9 rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" />
+              className="h-9 rounded-lg border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" />
           </div>
           <div className="space-y-1">
             <Label className="text-xs text-muted-foreground">To</Label>
             <input type="date" value={filterTo} onChange={(e) => setFilterTo(e.target.value)}
-              className="h-9 rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" />
+              className="h-9 rounded-lg border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" />
           </div>
           {(filterMember || filterFrom || filterTo) && (
             <Button size="sm" variant="outline"
@@ -184,7 +229,7 @@ export function ReportsClient({ reports: initial, currentUserId, viewerRole, mem
 
       {/* ── Reports list ── */}
       {filtered.length === 0 ? (
-        <div className="rounded-lg border bg-card p-12 text-center">
+        <div className="rounded-xl border bg-card p-12 text-center">
           <p className="text-sm text-muted-foreground">
             {reports.length === 0
               ? "No reports yet. Submit your first daily report."
@@ -211,6 +256,7 @@ export function ReportsClient({ reports: initial, currentUserId, viewerRole, mem
         <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle>Submit Daily Report</DialogTitle>
+            <DialogDescription>Share what you worked on today.</DialogDescription>
           </DialogHeader>
           <ReportForm
             onSaved={(r) => onSaved(r, true)}
@@ -224,6 +270,7 @@ export function ReportsClient({ reports: initial, currentUserId, viewerRole, mem
         <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle>Edit Report</DialogTitle>
+            <DialogDescription>Update this daily report.</DialogDescription>
           </DialogHeader>
           {editItem && (
             <ReportForm
@@ -249,8 +296,10 @@ export function ReportsClient({ reports: initial, currentUserId, viewerRole, mem
       {/* ── Delete confirm ── */}
       <Dialog open={!!deleteId} onOpenChange={(o) => { if (!o) setDeleteId(null); }}>
         <DialogContent className="max-w-sm">
-          <DialogHeader><DialogTitle>Delete this report?</DialogTitle></DialogHeader>
-          <p className="text-sm text-muted-foreground">This action cannot be undone.</p>
+          <DialogHeader>
+            <DialogTitle>Delete this report?</DialogTitle>
+            <DialogDescription>This action cannot be undone.</DialogDescription>
+          </DialogHeader>
           <div className="flex gap-2 justify-end mt-2">
             <Button variant="outline" onClick={() => setDeleteId(null)}>Cancel</Button>
             <Button variant="destructive" onClick={confirmDelete} disabled={deleting}>
@@ -259,6 +308,154 @@ export function ReportsClient({ reports: initial, currentUserId, viewerRole, mem
           </div>
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+// ─── Stat card ────────────────────────────────────────────────────────────────
+
+function StatCard({
+  icon: Icon, color, value, label,
+}: {
+  icon: typeof ClipboardList;
+  color: "primary" | "emerald" | "sky" | "amber";
+  value: number;
+  label: string;
+}) {
+  const colorClass = {
+    primary: "bg-primary/10 text-primary",
+    emerald: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
+    sky:     "bg-sky-500/10 text-sky-600 dark:text-sky-400",
+    amber:   "bg-amber-500/10 text-amber-600 dark:text-amber-400",
+  }[color];
+
+  return (
+    <div className="rounded-xl border bg-card p-4 flex items-center gap-3">
+      <div className={cn("rounded-lg p-2.5 shrink-0", colorClass)}>
+        <Icon className="h-4 w-4" />
+      </div>
+      <div>
+        <p className="text-2xl font-bold leading-none">{value.toLocaleString()}</p>
+        <p className="text-xs text-muted-foreground mt-1">{label}</p>
+      </div>
+    </div>
+  );
+}
+
+// ─── Today's Tasks ────────────────────────────────────────────────────────────
+
+function TodaysTasksCard({ currentUserId }: { currentUserId: string }) {
+  const [tasks, setTasks] = useState<DailyTaskRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [text, setText] = useState("");
+  const [category, setCategory] = useState<string>(DAILY_TASK_CATEGORIES[0]);
+  const [adding, setAdding] = useState(false);
+  const todayStr = todayPKT();
+
+  useEffect(() => {
+    fetch(`/api/daily-tasks?date=${todayStr}&userId=${currentUserId}`)
+      .then((res) => (res.ok ? res.json() : []))
+      .then(setTasks)
+      .finally(() => setLoading(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function addTask(e: React.FormEvent) {
+    e.preventDefault();
+    if (!text.trim()) return;
+    setAdding(true);
+    const res = await fetch("/api/daily-tasks", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ date: todayStr, text, category }),
+    });
+    setAdding(false);
+    if (res.ok) {
+      const created = await res.json();
+      setTasks((prev) => [created, ...prev]);
+      setText("");
+    }
+  }
+
+  async function cycleStatus(task: DailyTaskRow) {
+    const next = task.status === "pending" ? "in-progress" : task.status === "in-progress" ? "done" : "pending";
+    const res = await fetch(`/api/daily-tasks/${task.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: next }),
+    });
+    if (res.ok) setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, status: next } : t)));
+  }
+
+  async function removeTask(id: string) {
+    const res = await fetch(`/api/daily-tasks/${id}`, { method: "DELETE" });
+    if (res.ok) setTasks((prev) => prev.filter((t) => t.id !== id));
+  }
+
+  const statusStyles: Record<DailyTaskRow["status"], string> = {
+    pending:      "bg-muted text-muted-foreground border-border",
+    "in-progress": "bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-400/30",
+    done:         "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-400/30",
+  };
+  const statusLabel: Record<DailyTaskRow["status"], string> = {
+    pending: "Pending", "in-progress": "In Progress", done: "Done",
+  };
+
+  return (
+    <div className="rounded-xl border bg-card shadow-sm p-4 space-y-3">
+      <div className="flex items-center gap-2">
+        <ClipboardList className="h-4 w-4 text-muted-foreground" />
+        <h3 className="text-sm font-semibold">Today&apos;s Tasks</h3>
+        <span className="text-xs text-muted-foreground">— tagged work items for today, separate from your report below</span>
+      </div>
+
+      <form onSubmit={addTask} className="flex flex-wrap gap-2 items-center">
+        <select
+          value={category}
+          onChange={(e) => setCategory(e.target.value)}
+          className="h-9 rounded-lg border border-input bg-background px-2 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          {DAILY_TASK_CATEGORIES.map((c) => (
+            <option key={c} value={c}>{c}</option>
+          ))}
+        </select>
+        <input
+          type="text"
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          placeholder="What did you do? e.g. Reached out to 5 guest post sites"
+          className="h-9 flex-1 min-w-[180px] rounded-lg border border-input bg-background px-3 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        />
+        <Button type="submit" size="sm" className="h-9" disabled={adding || !text.trim()}>
+          {adding ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
+          Add
+        </Button>
+      </form>
+
+      {loading ? (
+        <p className="text-xs text-muted-foreground">Loading…</p>
+      ) : tasks.length === 0 ? (
+        <p className="text-xs text-muted-foreground">No tagged tasks logged for today yet.</p>
+      ) : (
+        <div className="space-y-1.5">
+          {tasks.map((t) => (
+            <div key={t.id} className="flex items-center gap-2 rounded-lg border px-3 py-2 text-sm">
+              <span className="text-xs rounded-full border px-2 py-0.5 bg-muted/50 text-muted-foreground shrink-0">{t.category}</span>
+              <span className="flex-1 truncate">{t.text}</span>
+              <button
+                onClick={() => cycleStatus(t)}
+                className={cn("text-[11px] rounded-full border px-2 py-0.5 shrink-0 font-medium", statusStyles[t.status])}
+                title="Click to cycle status"
+              >
+                {statusLabel[t.status]}
+              </button>
+              <button onClick={() => removeTask(t.id)} className="shrink-0 text-muted-foreground hover:text-destructive">
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -279,7 +476,7 @@ function ReportCard({
   const preview = isLong && !expanded ? report.report.slice(0, 200) + "…" : report.report;
 
   return (
-    <div className="rounded-lg border bg-card shadow-sm p-4 space-y-3">
+    <div className="rounded-xl border bg-card shadow-sm p-4 space-y-3">
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-center gap-3">
           {showMember && (
@@ -368,7 +565,7 @@ function ReportForm({
           value={date}
           onChange={(e) => setDate(e.target.value)}
           required
-          className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         />
       </div>
 
@@ -437,6 +634,7 @@ function ReportSheetDialog({
       <DialogContent className="max-w-[95vw] w-full max-h-[90vh] flex flex-col">
         <DialogHeader>
           <DialogTitle>Report Sheet</DialogTitle>
+          <DialogDescription>Monthly submission status per member.</DialogDescription>
         </DialogHeader>
 
         {/* Month navigation */}
@@ -451,7 +649,7 @@ function ReportSheetDialog({
         </div>
 
         {/* Grid */}
-        <div className="overflow-auto flex-1 rounded-lg border">
+        <div className="overflow-auto flex-1 rounded-xl border">
           <table className="text-xs border-collapse min-w-full">
             <thead>
               <tr className="bg-muted/50">
@@ -490,13 +688,13 @@ function ReportSheetDialog({
                         {isWeekend ? null : isFuture ? (
                           <span className="text-muted-foreground/40 text-xs">—</span>
                         ) : isHoliday ? (
-                          <span className="text-purple-500 font-bold text-xs">PH</span>
+                          <span className="text-purple-600 dark:text-purple-400 font-bold text-xs">PH</span>
                         ) : isLeave ? (
-                          <span className="text-amber-500 font-bold text-xs">L</span>
+                          <span className="text-amber-600 dark:text-amber-400 font-bold text-xs">L</span>
                         ) : hasReport ? (
-                          <span className="text-green-600 font-bold">✓</span>
+                          <span className="text-emerald-600 dark:text-emerald-400 font-bold">✓</span>
                         ) : (
-                          <span className="text-red-500 font-bold">✗</span>
+                          <span className="text-rose-600 dark:text-rose-400 font-bold">✗</span>
                         )}
                       </td>
                     );
@@ -509,10 +707,10 @@ function ReportSheetDialog({
 
         {/* Legend */}
         <div className="flex items-center gap-4 pt-1 text-xs text-muted-foreground flex-wrap">
-          <span className="flex items-center gap-1"><span className="text-green-600 font-bold">✓</span> Submitted</span>
-          <span className="flex items-center gap-1"><span className="text-amber-500 font-bold">L</span> Leave</span>
-          <span className="flex items-center gap-1"><span className="text-purple-500 font-bold">PH</span> Public Holiday</span>
-          <span className="flex items-center gap-1"><span className="text-red-500 font-bold">✗</span> Missing</span>
+          <span className="flex items-center gap-1"><span className="text-emerald-600 dark:text-emerald-400 font-bold">✓</span> Submitted</span>
+          <span className="flex items-center gap-1"><span className="text-amber-600 dark:text-amber-400 font-bold">L</span> Leave</span>
+          <span className="flex items-center gap-1"><span className="text-purple-600 dark:text-purple-400 font-bold">PH</span> Public Holiday</span>
+          <span className="flex items-center gap-1"><span className="text-rose-600 dark:text-rose-400 font-bold">✗</span> Missing</span>
           <span className="flex items-center gap-1"><span className="text-muted-foreground/40">—</span> Future</span>
           <span className="flex items-center gap-1"><span className="inline-block w-3 h-3 rounded-sm bg-muted/60 border" /> Weekend (off)</span>
         </div>

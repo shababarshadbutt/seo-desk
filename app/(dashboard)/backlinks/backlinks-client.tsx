@@ -12,7 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle,
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 
@@ -302,8 +302,8 @@ export function BacklinksClient({
               </>
             ) : isTeamTab && selectedGroup ? (
               <>
-                <div className="flex h-7 w-7 items-center justify-center rounded-full bg-blue-500/15 shrink-0">
-                  <Users className="h-4 w-4 text-blue-600" />
+                <div className="flex h-7 w-7 items-center justify-center rounded-full bg-primary/15 shrink-0">
+                  <Users className="h-4 w-4 text-primary" />
                 </div>
                 <div className="flex-1 text-left">
                   <span>{selectedGroup.name}</span>
@@ -325,8 +325,8 @@ export function BacklinksClient({
           </button>
 
           {memberDropdownOpen && (
-            <div className="absolute z-50 top-full left-0 mt-1.5 w-full rounded-xl border bg-card shadow-lg overflow-hidden">
-              <div className="p-2 border-b">
+            <div className="absolute z-50 top-full left-0 mt-1.5 w-full rounded-xl border border-border bg-card shadow-lg overflow-hidden">
+              <div className="p-2 border-b border-border">
                 <div className="relative">
                   <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
                   <input
@@ -364,7 +364,7 @@ export function BacklinksClient({
 
                 {!memberSearch && isSuperAdmin && groups.length > 0 && (
                   <>
-                    <div className="px-3 py-1.5 text-xs font-medium text-muted-foreground uppercase tracking-wide border-t mt-1">
+                    <div className="px-3 py-1.5 text-xs font-medium text-muted-foreground uppercase tracking-wide border-t border-border mt-1">
                       Teams
                     </div>
                     {groups.map((g) => (
@@ -373,20 +373,20 @@ export function BacklinksClient({
                         onClick={() => { switchTeam(g.id); setMemberDropdownOpen(false); }}
                         className={cn(
                           "w-full flex items-center gap-3 px-3 py-2 text-sm transition-colors hover:bg-muted/50",
-                          selectedTeamId === g.id && "bg-blue-500/5 text-blue-700 font-medium"
+                          selectedTeamId === g.id && "bg-primary/5 text-primary font-medium"
                         )}
                       >
                         <div className={cn(
                           "flex h-7 w-7 items-center justify-center rounded-full shrink-0",
-                          selectedTeamId === g.id ? "bg-blue-500/15" : "bg-muted"
+                          selectedTeamId === g.id ? "bg-primary/15" : "bg-muted"
                         )}>
-                          <Users className={cn("h-3.5 w-3.5", selectedTeamId === g.id ? "text-blue-600" : "text-muted-foreground")} />
+                          <Users className={cn("h-3.5 w-3.5", selectedTeamId === g.id ? "text-primary" : "text-muted-foreground")} />
                         </div>
                         <span className="flex-1 text-left">{g.name}</span>
                         <span className="text-xs text-muted-foreground">{groupCounts[g.id] ?? 0}</span>
                       </button>
                     ))}
-                    <div className="px-3 py-1.5 text-xs font-medium text-muted-foreground uppercase tracking-wide border-t mt-1">
+                    <div className="px-3 py-1.5 text-xs font-medium text-muted-foreground uppercase tracking-wide border-t border-border mt-1">
                       Members
                     </div>
                   </>
@@ -429,15 +429,15 @@ export function BacklinksClient({
 
       {/* ── Stats cards ── */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-        <StatCard icon={Link2}       label="Total"          value={stats.total}         color="blue" />
-        <StatCard icon={TrendingUp}  label="Live"           value={stats.live}          color="green" />
-        <StatCard icon={Clock}       label="Pending"        value={stats.pending}       color="yellow" />
-        <StatCard icon={AlertTriangle} label="Broken"       value={stats.broken}        color="red" />
+        <StatCard icon={Link2}       label="Total"          value={stats.total}         color="primary" />
+        <StatCard icon={TrendingUp}  label="Live"           value={stats.live}          color="emerald" />
+        <StatCard icon={Clock}       label="Pending"        value={stats.pending}       color="amber" />
+        <StatCard icon={AlertTriangle} label="Broken"       value={stats.broken}        color="rose" />
         <StatCard icon={ShieldAlert} label="Pending Review" value={stats.pendingReview} color="orange" />
       </div>
 
       {/* ── Filters ── */}
-      <div className="flex flex-wrap items-center gap-3 p-3 rounded-xl border bg-card">
+      <div className="flex flex-wrap items-center gap-3 p-3 rounded-xl border border-border bg-card">
         <select
           className="h-9 rounded-lg border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           value={filters.type}
@@ -495,7 +495,7 @@ export function BacklinksClient({
 
       {/* ── Table ── */}
       {rows.length === 0 ? (
-        <div className="rounded-xl border bg-card flex flex-col items-center justify-center py-16 gap-3">
+        <div className="rounded-xl border border-border bg-card flex flex-col items-center justify-center py-16 gap-3">
           <Link2 className="h-10 w-10 text-muted-foreground/20" />
           <p className="text-sm font-medium text-muted-foreground">
             {isSuperAdmin
@@ -510,11 +510,11 @@ export function BacklinksClient({
         </div>
       ) : (
         <div className="space-y-2">
-          <div className="rounded-xl border bg-card overflow-hidden shadow-sm">
+          <div className="rounded-xl border border-border bg-card overflow-hidden shadow-sm">
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="border-b bg-muted/40">
+                  <tr className="border-b border-border bg-muted/40">
                     <th className="text-left px-4 py-3 font-medium text-muted-foreground text-xs uppercase tracking-wide whitespace-nowrap">Website</th>
                     <th className="text-left px-4 py-3 font-medium text-muted-foreground text-xs uppercase tracking-wide whitespace-nowrap">Backlink URL</th>
                     <th className="text-left px-4 py-3 font-medium text-muted-foreground text-xs uppercase tracking-wide whitespace-nowrap">Source Site</th>
@@ -529,7 +529,7 @@ export function BacklinksClient({
                     <th className="px-4 py-3 w-24" />
                   </tr>
                 </thead>
-                <tbody className="divide-y">
+                <tbody className="divide-y divide-border">
                   {rows.map((row) => (
                     <BacklinkTableRow
                       key={row.id}
@@ -571,7 +571,10 @@ export function BacklinksClient({
       {!isSuperAdmin && (
         <Dialog open={addOpen} onOpenChange={setAddOpen}>
           <DialogContent className="max-w-lg">
-            <DialogHeader><DialogTitle>Add Backlink</DialogTitle></DialogHeader>
+            <DialogHeader>
+              <DialogTitle>Add Backlink</DialogTitle>
+              <DialogDescription>Submit a new backlink for review.</DialogDescription>
+            </DialogHeader>
             <AddBacklinkForm
               backlinkSites={backlinkSites}
               assignedWebsites={assignedWebsites}
@@ -586,7 +589,10 @@ export function BacklinksClient({
       {!isSuperAdmin && (
         <Dialog open={!!editItem} onOpenChange={(o) => { if (!o) setEditItem(null); }}>
           <DialogContent className="max-w-lg">
-            <DialogHeader><DialogTitle>Edit Backlink</DialogTitle></DialogHeader>
+            <DialogHeader>
+              <DialogTitle>Edit Backlink</DialogTitle>
+              <DialogDescription>Update this backlink&apos;s details.</DialogDescription>
+            </DialogHeader>
             {editItem && (
               <EditBacklinkForm initial={editItem} onSuccess={onEdited} onCancel={() => setEditItem(null)} />
             )}
@@ -597,7 +603,12 @@ export function BacklinksClient({
       {/* ── Reject reason dialog ── */}
       <Dialog open={!!rejectRow} onOpenChange={(o) => { if (!o) setRejectRow(null); }}>
         <DialogContent className="max-w-sm">
-          <DialogHeader><DialogTitle>Reject Backlink</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle>Reject Backlink</DialogTitle>
+            <DialogDescription>
+              Rejecting backlink to <span className="font-medium text-foreground">{rejectRow?.websiteName}</span>. The member will be able to resubmit.
+            </DialogDescription>
+          </DialogHeader>
           {rejectRow && (
             <RejectForm
               row={rejectRow}
@@ -612,8 +623,10 @@ export function BacklinksClient({
       {!isSuperAdmin && (
         <Dialog open={!!deleteId} onOpenChange={(o) => { if (!o) setDeleteId(null); }}>
           <DialogContent className="max-w-sm">
-            <DialogHeader><DialogTitle>Delete Backlink</DialogTitle></DialogHeader>
-            <p className="text-sm text-muted-foreground">Are you sure? This cannot be undone.</p>
+            <DialogHeader>
+              <DialogTitle>Delete Backlink</DialogTitle>
+              <DialogDescription>Are you sure? This cannot be undone.</DialogDescription>
+            </DialogHeader>
             <div className="flex gap-2 justify-end pt-2">
               <Button variant="outline" onClick={() => setDeleteId(null)} disabled={deleting}>Cancel</Button>
               <Button variant="destructive" onClick={confirmDelete} disabled={deleting}>
@@ -631,17 +644,17 @@ export function BacklinksClient({
 
 function StatCard({ icon: Icon, label, value, color }: {
   icon: React.ElementType; label: string; value: number;
-  color: "blue" | "green" | "yellow" | "red" | "orange";
+  color: "primary" | "emerald" | "amber" | "rose" | "orange";
 }) {
   const colors = {
-    blue:   "bg-blue-50 text-blue-600",
-    green:  "bg-green-50 text-green-600",
-    yellow: "bg-yellow-50 text-yellow-600",
-    red:    "bg-red-50 text-red-500",
-    orange: "bg-orange-50 text-orange-500",
+    primary: "bg-primary/10 text-primary",
+    emerald: "bg-emerald-500/10 text-emerald-600",
+    amber:   "bg-amber-500/10 text-amber-600",
+    rose:    "bg-rose-500/10 text-rose-600",
+    orange:  "bg-orange-500/10 text-orange-600",
   };
   return (
-    <div className="rounded-xl border bg-card p-4 flex items-center gap-3">
+    <div className="rounded-xl border border-border bg-card p-4 flex items-center gap-3">
       <div className={cn("rounded-lg p-2.5 shrink-0", colors[color])}>
         <Icon className="h-4 w-4" />
       </div>
@@ -681,7 +694,7 @@ function BacklinkTableRow({
       </td>
       <td className="px-4 py-3 max-w-[220px]">
         <a href={row.backlinkUrl} target="_blank" rel="noopener noreferrer"
-          className="flex items-center gap-1 text-blue-600 hover:underline text-xs" title={row.backlinkUrl}>
+          className="flex items-center gap-1 text-primary hover:underline text-xs" title={row.backlinkUrl}>
           <span className="truncate">{stripProtocol(row.backlinkUrl)}</span>
           <ExternalLink className="h-3 w-3 shrink-0" />
         </a>
@@ -723,7 +736,7 @@ function BacklinkTableRow({
               <Button
                 type="button"
                 variant="ghost" size="sm"
-                className="h-7 w-7 p-0 text-green-600 hover:text-green-700 hover:bg-green-50"
+                className="h-7 w-7 p-0 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-500/10"
                 onClick={onApprove}
                 disabled={approving}
                 title="Approve"
@@ -746,7 +759,7 @@ function BacklinkTableRow({
             </>
           )}
           {canModify && (
-            <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+            <div className="flex gap-1">
               <Button type="button" variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={onEdit}>
                 <Pencil className="h-3.5 w-3.5" />
               </Button>
@@ -787,14 +800,10 @@ function RejectForm({ row, onDone, onCancel }: {
 
   return (
     <form onSubmit={handleSubmit} className="space-y-3 mt-1">
-      <p className="text-sm text-muted-foreground">
-        Rejecting backlink to <span className="font-medium text-foreground">{row.websiteName}</span>.
-        The member will be able to resubmit.
-      </p>
       <div className="space-y-1.5">
         <Label>Reason (optional)</Label>
         <textarea
-          className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring resize-none"
+          className="flex w-full rounded-lg border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring resize-none"
           rows={3}
           placeholder="Explain why this backlink is being rejected…"
           value={reason}
@@ -894,7 +903,7 @@ function AddBacklinkForm({ backlinkSites, assignedWebsites, onSuccess, onCancel 
     onSuccess(await res.json());
   }
 
-  const selectClass = "h-10 w-full rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
+  const selectClass = "h-10 w-full rounded-lg border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
@@ -941,9 +950,9 @@ function AddBacklinkForm({ backlinkSites, assignedWebsites, onSuccess, onCancel 
             tabIndex={selectedSource ? 0 : -1}
             aria-disabled={!selectedSource}
             className={cn(
-              "h-10 w-10 shrink-0 flex items-center justify-center rounded-md border border-input transition-colors",
+              "h-10 w-10 shrink-0 flex items-center justify-center rounded-lg border border-input transition-colors",
               selectedSource
-                ? "bg-background text-blue-600 hover:bg-blue-50 hover:border-blue-300 cursor-pointer"
+                ? "bg-background text-primary hover:bg-primary/10 hover:border-primary/40 cursor-pointer"
                 : "bg-muted text-muted-foreground/40 pointer-events-none"
             )}
             title={selectedSource ? `Open ${selectedSource.url}` : "Select a source site first"}
@@ -972,8 +981,8 @@ function AddBacklinkForm({ backlinkSites, assignedWebsites, onSuccess, onCancel 
             </button>
 
             {siteDropdownOpen && (
-              <div className="absolute z-50 top-full left-0 mt-1 w-full rounded-lg border bg-card shadow-lg overflow-hidden">
-                <div className="p-2 border-b">
+              <div className="absolute z-50 top-full left-0 mt-1 w-full rounded-lg border border-border bg-card shadow-lg overflow-hidden">
+                <div className="p-2 border-b border-border">
                   <div className="relative">
                     <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
                     <input
@@ -982,7 +991,7 @@ function AddBacklinkForm({ backlinkSites, assignedWebsites, onSuccess, onCancel 
                       placeholder="Search sites…"
                       value={siteSearch}
                       onChange={(e) => setSiteSearch(e.target.value)}
-                      className="w-full h-8 pl-8 pr-3 rounded-md border border-input bg-background text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      className="w-full h-8 pl-8 pr-3 rounded-lg border border-input bg-background text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     />
                     {siteSearch && (
                       <button type="button" onClick={() => setSiteSearch("")} className="absolute right-2 top-1/2 -translate-y-1/2">
@@ -1018,7 +1027,7 @@ function AddBacklinkForm({ backlinkSites, assignedWebsites, onSuccess, onCancel 
           </div>
         </div>
         {availableSites.length === 0 && targetWebsiteId && (
-          <p className="text-xs text-yellow-600">All available source sites have already been used for this website.</p>
+          <p className="text-xs text-amber-600">All available source sites have already been used for this website.</p>
         )}
         {selectedSource && (
           <p className="text-xs text-muted-foreground">
@@ -1055,7 +1064,7 @@ function AddBacklinkForm({ backlinkSites, assignedWebsites, onSuccess, onCancel 
             value={date}
             onChange={(e) => setDate(e.target.value)}
             required
-            className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           />
         </div>
       </div>
@@ -1107,7 +1116,7 @@ function EditBacklinkForm({ initial, onSuccess, onCancel }: {
     onSuccess(await res.json());
   }
 
-  const selectClass = "h-10 w-full rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
+  const selectClass = "h-10 w-full rounded-lg border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
@@ -1140,7 +1149,7 @@ function EditBacklinkForm({ initial, onSuccess, onCancel }: {
           value={form.date}
           onChange={(e) => set("date", e.target.value)}
           required
-          className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         />
       </div>
       {error && <p className="text-sm text-destructive">{error}</p>}
@@ -1164,7 +1173,7 @@ function ApprovalBadge({ status, reason, rejectedByName }: {
 }) {
   if (status === "approved") {
     return (
-      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium border bg-green-50 text-green-700 border-green-200">
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium border bg-emerald-500/10 text-emerald-700 border-emerald-500/20">
         <CheckCircle2 className="h-3 w-3" />Approved
       </span>
     );
@@ -1172,21 +1181,21 @@ function ApprovalBadge({ status, reason, rejectedByName }: {
   if (status === "rejected") {
     return (
       <div className="space-y-1">
-        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium border bg-red-50 text-red-700 border-red-200">
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium border bg-rose-500/10 text-rose-700 border-rose-500/20">
           <XCircle className="h-3 w-3" />Rejected
         </span>
         {rejectedByName && (
           <p className="text-xs text-muted-foreground">by {rejectedByName}</p>
         )}
         {reason && (
-          <p className="text-xs text-red-600 leading-snug">{reason}</p>
+          <p className="text-xs text-rose-600 leading-snug">{reason}</p>
         )}
       </div>
     );
   }
   if (status === "pending") {
     return (
-      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium border bg-orange-50 text-orange-600 border-orange-200">
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium border bg-orange-500/10 text-orange-600 border-orange-500/20">
         <Clock className="h-3 w-3" />Pending Review
       </span>
     );

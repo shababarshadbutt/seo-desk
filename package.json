@@ -2,13 +2,13 @@
   "name": "asap-scripting",
   "version": "1.0.0",
   "private": true,
+  "type": "module",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "test:e2e": "playwright test",
-    "type": "module"
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1131.0",
@@ -31,6 +31,7 @@
     "nextjs-toploader": "^3.9.17",
     "react": "^18",
     "react-dom": "^18",
+    "recharts": "^3.10.1",
     "sax": "^1.6.1",
     "ssh2-sftp-client": "^12.1.1",
     "tailwind-merge": "^3.5.0",

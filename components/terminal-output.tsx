@@ -34,7 +34,7 @@ export function TerminalOutput({ lines, status, progress }: TerminalOutputProps)
   }
 
   return (
-    <div className="rounded-lg border overflow-hidden shadow-sm">
+    <div className="rounded-xl border border-border overflow-hidden shadow-sm">
       {/* Terminal header bar */}
       <div className="flex items-center justify-between bg-gray-800 px-4 py-2">
         <div className="flex items-center gap-2 text-xs">

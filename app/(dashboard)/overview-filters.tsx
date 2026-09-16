@@ -35,7 +35,7 @@ export function OverviewFilters() {
           type="date"
           value={from}
           onChange={(e) => setFrom(e.target.value)}
-          className="h-9 rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="h-9 rounded-lg border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         />
       </div>
       <div className="space-y-1">
@@ -44,7 +44,7 @@ export function OverviewFilters() {
           type="date"
           value={to}
           onChange={(e) => setTo(e.target.value)}
-          className="h-9 rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="h-9 rounded-lg border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         />
       </div>
       <Button size="sm" onClick={apply} disabled={!from && !to}>

@@ -5,7 +5,7 @@ import { Server, Cloud, Link as LinkIcon, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { TerminalOutput, type RunStatus } from "@/components/terminal-output";
 import { cn } from "@/lib/utils";
 
@@ -282,19 +282,19 @@ export function LastmodUpdaterClient() {
   return (
     <div className="space-y-6 max-w-3xl">
       {error && (
-        <div className="rounded-md border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+        <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
           {error}
         </div>
       )}
 
       {/* 1. Source */}
-      <div className="rounded-lg border bg-card p-6 shadow-sm space-y-4">
+      <div className="rounded-xl border border-border bg-card p-6 shadow-sm space-y-4">
         <div>
           <h3 className="font-semibold">1. Source</h3>
           <p className="text-sm text-muted-foreground">Choose where this domain&apos;s current sitemaps live.</p>
         </div>
 
-        <div className="flex rounded-md border p-1 bg-muted/40 w-fit">
+        <div className="flex rounded-lg border border-border p-1 bg-muted/40 w-fit">
           <TabButton active={sourceTab === "sftp"} onClick={() => switchSourceTab("sftp")} icon={<Server className="h-4 w-4" />}>
             SFTP
           </TabButton>
@@ -324,7 +324,7 @@ export function LastmodUpdaterClient() {
             <Label htmlFor="domain-select">Domain</Label>
             <select
               id="domain-select"
-              className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm disabled:opacity-50"
+              className="flex h-10 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm disabled:opacity-50"
               value={selectedDomain}
               onChange={(e) => setSelectedDomain(e.target.value)}
               disabled={loadingDomains || domains.length === 0}
@@ -351,7 +351,7 @@ export function LastmodUpdaterClient() {
       </div>
 
       {/* 2. Scope */}
-      <div className="rounded-lg border bg-card p-6 shadow-sm space-y-4">
+      <div className="rounded-xl border border-border bg-card p-6 shadow-sm space-y-4">
         <div>
           <h3 className="font-semibold">2. Scope</h3>
           <p className="text-sm text-muted-foreground">Choose which files get a new &lt;lastmod&gt;.</p>
@@ -361,7 +361,7 @@ export function LastmodUpdaterClient() {
           <p className="text-sm text-muted-foreground">Fetch a domain&apos;s files above to choose a scope.</p>
         ) : (
           <>
-            <div className="flex rounded-md border p-1 bg-muted/40 w-fit">
+            <div className="flex rounded-lg border border-border p-1 bg-muted/40 w-fit">
               <TabButton active={scopeTab === "all"} onClick={() => switchScopeTab("all")}>All Files</TabButton>
               <TabButton active={scopeTab === "selected"} onClick={() => switchScopeTab("selected")}>Selected Files</TabButton>
               <TabButton active={scopeTab === "vertical"} onClick={() => switchScopeTab("vertical")}>Vertical wise</TabButton>
@@ -372,7 +372,7 @@ export function LastmodUpdaterClient() {
             )}
 
             {scopeTab === "selected" && (
-              <div className="max-h-64 overflow-y-auto rounded-md border divide-y">
+              <div className="max-h-64 overflow-y-auto rounded-lg border border-border divide-y divide-border">
                 {leafFiles.map((f) => (
                   <label key={f.filename} className="flex items-center gap-2 px-3 py-2 text-sm hover:bg-muted/40 cursor-pointer">
                     <input
@@ -392,7 +392,7 @@ export function LastmodUpdaterClient() {
                 {!loadingVerticals && verticals.length === 0 && (
                   <p className="text-sm text-muted-foreground">No patterns detected — try All Files or Selected Files instead.</p>
                 )}
-                <div className="max-h-72 overflow-y-auto rounded-md border divide-y">
+                <div className="max-h-72 overflow-y-auto rounded-lg border border-border divide-y divide-border">
                   {verticals.map((v) => (
                     <label key={v.template} className="flex items-start gap-2 px-3 py-2 text-sm hover:bg-muted/40 cursor-pointer">
                       <input
@@ -417,7 +417,7 @@ export function LastmodUpdaterClient() {
       </div>
 
       {/* 3. Date & push */}
-      <div className="rounded-lg border bg-card p-6 shadow-sm space-y-4">
+      <div className="rounded-xl border border-border bg-card p-6 shadow-sm space-y-4">
         <div>
           <h3 className="font-semibold">3. Date &amp; push</h3>
           <p className="text-sm text-muted-foreground">Defaults to today — pick another date if needed.</p>
@@ -440,11 +440,11 @@ export function LastmodUpdaterClient() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>No sitemap-index.xml found</DialogTitle>
+            <DialogDescription>
+              {domain} doesn&apos;t have a sitemap-index.xml. Create one referencing the {leafFiles.length} discovered file(s) and
+              push it to S3? File-level lastmod updates need an index to attach &lt;lastmod&gt; to.
+            </DialogDescription>
           </DialogHeader>
-          <p className="text-sm text-muted-foreground">
-            {domain} doesn&apos;t have a sitemap-index.xml. Create one referencing the {leafFiles.length} discovered file(s) and
-            push it to S3? File-level lastmod updates need an index to attach &lt;lastmod&gt; to.
-          </p>
           <div className="flex justify-end gap-2 pt-2">
             <Button variant="outline" onClick={() => setShowCreateIndexDialog(false)} disabled={creatingIndex}>
               Not now
@@ -461,10 +461,10 @@ export function LastmodUpdaterClient() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Free up local disk space?</DialogTitle>
+            <DialogDescription>
+              This run used {(localBytesUsed / 1024).toFixed(1)} KB of local temp storage. Delete it now?
+            </DialogDescription>
           </DialogHeader>
-          <p className="text-sm text-muted-foreground">
-            This run used {(localBytesUsed / 1024).toFixed(1)} KB of local temp storage. Delete it now?
-          </p>
           <div className="flex justify-end gap-2 pt-2">
             <Button variant="outline" onClick={() => respondCleanup(false)}>Keep files</Button>
             <Button onClick={() => respondCleanup(true)}>Delete local files</Button>
@@ -491,7 +491,7 @@ function TabButton({
       type="button"
       onClick={onClick}
       className={cn(
-        "flex items-center gap-1.5 rounded px-3 py-1.5 text-sm font-medium transition-colors",
+        "flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors",
         active ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
       )}
     >

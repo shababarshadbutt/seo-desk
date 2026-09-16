@@ -2,12 +2,13 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { Trash2, Plus, Loader2, ShieldAlert, KeyRound, Users, ChevronDown, ChevronUp, ShieldCheck, HardDrive } from "lucide-react";
+import { Trash2, Plus, Loader2, ShieldAlert, KeyRound, Users, ChevronDown, ChevronUp, ShieldCheck, HardDrive, CheckCircle2, Globe, BarChart3 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
+import { cn } from "@/lib/utils";
 
 interface ServiceAccount { name: string }
 interface GscProperty { url: string; displayName: string }
@@ -32,18 +33,103 @@ interface SettingsClientProps {
   userMap: Record<string, UserOption>;
 }
 
+const TABS = [
+  { key: "general", label: "General & Security" },
+  { key: "credentials", label: "Credentials & Properties" },
+  { key: "storage", label: "Storage" },
+  { key: "teams", label: "Teams" },
+] as const;
+
+type TabKey = (typeof TABS)[number]["key"];
+
 export function SettingsClient(props: SettingsClientProps) {
+  const [tab, setTab] = useState<TabKey>("general");
+
   return (
     <div className="space-y-6">
-      <SecurityRetentionCard
-        initialSessionTimeoutMinutes={props.sessionTimeoutMinutes}
-        initialLogRetentionDays={props.logRetentionDays}
-      />
-      <ServiceAccountsCard initial={props.serviceAccounts} />
-      <GscPropertiesCard initial={props.gscProperties} />
-      <Ga4PropertiesCard initial={props.ga4Properties} />
-      <StorageSettingsCard />
-      <GroupsCard initialGroups={props.groups} users={props.users} userMap={props.userMap} />
+      {/* ── Stat cards ── */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div className="rounded-xl border bg-card p-4 flex items-center gap-3">
+          <div className="rounded-lg bg-primary/10 p-2.5 shrink-0">
+            <KeyRound className="h-4 w-4 text-primary" />
+          </div>
+          <div>
+            <p className="text-2xl font-bold leading-none">{props.serviceAccounts.length}</p>
+            <p className="text-xs text-muted-foreground mt-1">Service Accounts</p>
+          </div>
+        </div>
+        <div className="rounded-xl border bg-card p-4 flex items-center gap-3">
+          <div className="rounded-lg bg-sky-500/10 p-2.5 shrink-0">
+            <Globe className="h-4 w-4 text-sky-600 dark:text-sky-400" />
+          </div>
+          <div>
+            <p className="text-2xl font-bold leading-none">{props.gscProperties.length}</p>
+            <p className="text-xs text-muted-foreground mt-1">GSC Properties</p>
+          </div>
+        </div>
+        <div className="rounded-xl border bg-card p-4 flex items-center gap-3">
+          <div className="rounded-lg bg-amber-500/10 p-2.5 shrink-0">
+            <BarChart3 className="h-4 w-4 text-amber-600 dark:text-amber-400" />
+          </div>
+          <div>
+            <p className="text-2xl font-bold leading-none">{props.ga4Properties.length}</p>
+            <p className="text-xs text-muted-foreground mt-1">GA4 Properties</p>
+          </div>
+        </div>
+        <div className="rounded-xl border bg-card p-4 flex items-center gap-3">
+          <div className="rounded-lg bg-emerald-500/10 p-2.5 shrink-0">
+            <Users className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+          </div>
+          <div>
+            <p className="text-2xl font-bold leading-none">{props.groups.length}</p>
+            <p className="text-xs text-muted-foreground mt-1">Team Groups</p>
+          </div>
+        </div>
+      </div>
+
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <div className="flex flex-wrap gap-1.5 p-1 rounded-xl border bg-card w-fit">
+          {TABS.map((t) => (
+            <button
+              key={t.key}
+              onClick={() => setTab(t.key)}
+              className={cn(
+                "px-3 py-1.5 rounded-lg text-sm font-medium transition-colors",
+                tab === t.key
+                  ? "bg-primary text-primary-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
+              )}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+        <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+          <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
+          Each section saves independently — changes apply as soon as you save them.
+        </p>
+      </div>
+
+      {tab === "general" && (
+        <SecurityRetentionCard
+          initialSessionTimeoutMinutes={props.sessionTimeoutMinutes}
+          initialLogRetentionDays={props.logRetentionDays}
+        />
+      )}
+
+      {tab === "credentials" && (
+        <div className="space-y-6">
+          <ServiceAccountsCard initial={props.serviceAccounts} />
+          <GscPropertiesCard initial={props.gscProperties} />
+          <Ga4PropertiesCard initial={props.ga4Properties} />
+        </div>
+      )}
+
+      {tab === "storage" && <StorageSettingsCard />}
+
+      {tab === "teams" && (
+        <GroupsCard initialGroups={props.groups} users={props.users} userMap={props.userMap} />
+      )}
     </div>
   );
 }
@@ -85,7 +171,7 @@ function StorageSettingsCard() {
 
   if (!config) {
     return (
-      <div className="rounded-lg border bg-card p-5 shadow-sm">
+      <div className="rounded-xl border bg-card p-5 shadow-sm">
         <p className="text-sm text-muted-foreground">Loading storage settings…</p>
       </div>
     );
@@ -157,7 +243,7 @@ function StorageSettingsCard() {
   }
 
   return (
-    <div className="rounded-lg border bg-card p-5 shadow-sm space-y-5">
+    <div className="rounded-xl border bg-card p-5 shadow-sm space-y-5">
       <div className="flex items-center gap-2">
         <HardDrive className="h-4 w-4 text-muted-foreground" />
         <div>
@@ -245,7 +331,7 @@ function StorageSettingsCard() {
       </p>
 
       {error && <p className="text-sm text-destructive">{error}</p>}
-      {success && <p className="text-sm text-green-600">{success}</p>}
+      {success && <p className="text-sm text-emerald-600 dark:text-emerald-400">{success}</p>}
     </div>
   );
 }
@@ -310,7 +396,7 @@ function SecurityRetentionCard({
   }
 
   return (
-    <div className="rounded-lg border bg-card p-5 shadow-sm space-y-4">
+    <div className="rounded-xl border bg-card p-5 shadow-sm space-y-4">
       <div className="flex items-center gap-2">
         <ShieldCheck className="h-4 w-4 text-muted-foreground" />
         <div>
@@ -344,7 +430,7 @@ function SecurityRetentionCard({
           <Label htmlFor="log-retention">Keep execution logs for</Label>
           <select
             id="log-retention"
-            className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             value={retentionDays}
             onChange={(e) => handleRetentionChange(Number(e.target.value))}
             disabled={saving}
@@ -357,7 +443,7 @@ function SecurityRetentionCard({
       </div>
 
       {error && <p className="text-sm text-destructive">{error}</p>}
-      {success && <p className="text-sm text-green-600">{success}</p>}
+      {success && <p className="text-sm text-emerald-600 dark:text-emerald-400">{success}</p>}
     </div>
   );
 }
@@ -418,7 +504,7 @@ function ServiceAccountsCard({ initial }: { initial: ServiceAccount[] }) {
   }
 
   return (
-    <div className="rounded-lg border bg-card p-5 shadow-sm space-y-4">
+    <div className="rounded-xl border bg-card p-5 shadow-sm space-y-4">
       <div className="flex items-center justify-between">
         <div>
           <h3 className="font-semibold">Google Service Accounts</h3>
@@ -427,7 +513,7 @@ function ServiceAccountsCard({ initial }: { initial: ServiceAccount[] }) {
           </p>
         </div>
         <Badge variant={accounts.length > 0 ? "success" : "outline"}
-          className={accounts.length === 0 ? "text-yellow-700 border-yellow-300 bg-yellow-50" : ""}>
+          className={accounts.length === 0 ? "text-amber-700 dark:text-amber-400 border-amber-400/30 bg-amber-500/10" : ""}>
           {accounts.length > 0
             ? `${accounts.length} configured`
             : <><ShieldAlert className="h-3 w-3 inline mr-1" />None</>}
@@ -439,7 +525,7 @@ function ServiceAccountsCard({ initial }: { initial: ServiceAccount[] }) {
         <div className="space-y-2">
           {accounts.map((account) => (
             <div key={account.name}
-              className="flex items-center justify-between rounded-md border px-3 py-2">
+              className="flex items-center justify-between rounded-lg border px-3 py-2">
               <div className="flex items-center gap-2 text-sm">
                 <KeyRound className="h-4 w-4 text-muted-foreground" />
                 <span className="font-medium">{account.name}</span>
@@ -478,7 +564,7 @@ function ServiceAccountsCard({ initial }: { initial: ServiceAccount[] }) {
           />
         </div>
         {error && <p className="text-sm text-destructive">{error}</p>}
-        {success && <p className="text-sm text-green-600">{success}</p>}
+        {success && <p className="text-sm text-emerald-600 dark:text-emerald-400">{success}</p>}
         <Button type="submit" size="sm" disabled={loading || !name.trim() || !json.trim()}>
           {loading && <Loader2 className="h-4 w-4 animate-spin" />}
           <Plus className="h-4 w-4" />
@@ -520,7 +606,7 @@ function GscPropertiesCard({ initial }: { initial: GscProperty[] }) {
   }
 
   return (
-    <div className="rounded-lg border bg-card p-5 shadow-sm space-y-4">
+    <div className="rounded-xl border bg-card p-5 shadow-sm space-y-4">
       <div>
         <h3 className="font-semibold">Google Search Console Properties</h3>
         <p className="text-sm text-muted-foreground">Properties available for use in GSC scripts.</p>
@@ -529,7 +615,7 @@ function GscPropertiesCard({ initial }: { initial: GscProperty[] }) {
       {properties.length > 0 && (
         <div className="space-y-2">
           {properties.map((p, i) => (
-            <div key={i} className="flex items-center justify-between rounded-md border px-3 py-2 text-sm">
+            <div key={i} className="flex items-center justify-between rounded-lg border px-3 py-2 text-sm">
               <div>
                 <span className="font-medium">{p.displayName}</span>
                 <span className="text-muted-foreground ml-2 text-xs">{p.url}</span>
@@ -641,7 +727,7 @@ function GroupsCard({
   }
 
   return (
-    <div className="rounded-lg border bg-card p-5 shadow-sm space-y-4">
+    <div className="rounded-xl border bg-card p-5 shadow-sm space-y-4">
       <div className="flex items-center justify-between">
         <div>
           <h3 className="font-semibold">Team Groups</h3>
@@ -661,7 +747,7 @@ function GroupsCard({
             const lead = localUserMap[group.leadUserId];
             const isExpanded = expandedId === group.id;
             return (
-              <div key={group.id} className="rounded-md border overflow-hidden">
+              <div key={group.id} className="rounded-xl border overflow-hidden">
                 <div className="flex items-center justify-between px-3 py-2 bg-muted/30">
                   <div className="flex items-center gap-2 text-sm">
                     <Users className="h-4 w-4 text-muted-foreground" />
@@ -703,7 +789,7 @@ function GroupsCard({
                             <button
                               key={u.id}
                               onClick={() => toggleMember(group, u.id)}
-                              className={`flex items-center gap-2 rounded-md border px-2 py-1.5 text-xs text-left transition-colors ${
+                              className={`flex items-center gap-2 rounded-lg border px-2 py-1.5 text-xs text-left transition-colors ${
                                 isMember
                                   ? "border-primary/50 bg-primary/5 text-primary"
                                   : "hover:bg-muted/50"
@@ -740,7 +826,7 @@ function GroupsCard({
           <div className="flex-1 space-y-1">
             <Label className="text-xs">Supervisor</Label>
             <select
-              className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               value={newLeadId}
               onChange={(e) => setNewLeadId(e.target.value)}
               required
@@ -753,7 +839,7 @@ function GroupsCard({
           </div>
         </div>
         {subLeads.length === 0 && (
-          <p className="text-xs text-yellow-600">
+          <p className="text-xs text-amber-600 dark:text-amber-400">
             No supervisors found. Go to Users to assign the Supervisor role first.
           </p>
         )}
@@ -799,7 +885,7 @@ function Ga4PropertiesCard({ initial }: { initial: Ga4Property[] }) {
   }
 
   return (
-    <div className="rounded-lg border bg-card p-5 shadow-sm space-y-4">
+    <div className="rounded-xl border bg-card p-5 shadow-sm space-y-4">
       <div>
         <h3 className="font-semibold">GA4 Properties</h3>
         <p className="text-sm text-muted-foreground">Properties available for the GA4 Reporter script.</p>
@@ -808,7 +894,7 @@ function Ga4PropertiesCard({ initial }: { initial: Ga4Property[] }) {
       {properties.length > 0 && (
         <div className="space-y-2">
           {properties.map((p, i) => (
-            <div key={i} className="flex items-center justify-between rounded-md border px-3 py-2 text-sm">
+            <div key={i} className="flex items-center justify-between rounded-lg border px-3 py-2 text-sm">
               <div>
                 <span className="font-medium">{p.displayName}</span>
                 <span className="text-muted-foreground ml-2 text-xs font-mono">{p.propertyId}</span>

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { ArrowRight } from "lucide-react";
 import { type ScriptConfig } from "@/lib/scripts-config";
+import { getCategoryForSlug } from "@/lib/script-categories";
 import { Button } from "@/components/ui/button";
 
 interface ScriptCardProps {
@@ -9,6 +10,7 @@ interface ScriptCardProps {
 
 export function ScriptCard({ script }: ScriptCardProps) {
   const Icon = script.icon;
+  const category = getCategoryForSlug(script.slug);
 
   return (
     <div className="group flex flex-col rounded-xl border bg-card p-5 shadow-sm transition-all duration-300 ease-out hover:shadow-xl hover:shadow-black/8 hover:-translate-y-1 hover:scale-[1.02]">
@@ -17,8 +19,15 @@ export function ScriptCard({ script }: ScriptCardProps) {
         <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10">
           <Icon className="h-5 w-5 text-primary" />
         </div>
-        <div className="min-w-0">
-          <h3 className="font-semibold text-sm leading-snug">{script.name}</h3>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-start justify-between gap-2">
+            <h3 className="font-semibold text-sm leading-snug">{script.name}</h3>
+            {category && (
+              <span className="shrink-0 inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground uppercase tracking-wide">
+                {category}
+              </span>
+            )}
+          </div>
           {script.outputLabel && (
             <p className="text-xs text-muted-foreground mt-0.5">
               → {script.outputLabel}

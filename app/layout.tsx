@@ -27,7 +27,15 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
+      <head>
+        <script
+          // Applies the stored theme before paint to avoid a light/dark flash.
+          dangerouslySetInnerHTML={{
+            __html: `try{if(localStorage.getItem('theme')==='dark')document.documentElement.classList.add('dark')}catch(e){}`,
+          }}
+        />
+      </head>
       <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
         <NextTopLoader color="#10B981" shadow="0 0 10px #10B981,0 0 5px #10B981" height={3} showSpinner={false} />
         <SessionProvider>{children}</SessionProvider>

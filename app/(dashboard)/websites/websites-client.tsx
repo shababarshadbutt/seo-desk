@@ -2,11 +2,11 @@
 
 import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Pencil, Trash2, Loader2, Users, Globe, ExternalLink, UserPlus, Zap } from "lucide-react";
+import { Plus, Pencil, Trash2, Loader2, Users, Globe, ExternalLink, UserPlus, Zap, X, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -49,6 +49,10 @@ export function WebsitesClient({ websites: initial, members, viewerRole, service
   const [deleting,   setDeleting]      = useState(false);
   const [assignItem, setAssignItem]    = useState<WebsiteRow | null>(null);
   const [autoItem,   setAutoItem]      = useState<WebsiteRow | null>(null);
+  const [selected,   setSelected]      = useState<Set<string>>(new Set());
+  const [bulkAction, setBulkAction]    = useState<"delete" | "enableAutomation" | "disableAutomation" | null>(null);
+  const [bulkBusy,   setBulkBusy]      = useState(false);
+  const [bulkResult, setBulkResult]    = useState<{ succeeded: number; skipped: { name: string; reason: string }[] } | null>(null);
 
   const isSuperAdmin = viewerRole === "super-admin";
   const canFilter    = viewerRole === "super-admin" || viewerRole === "sub-lead";
@@ -57,6 +61,56 @@ export function WebsitesClient({ websites: initial, members, viewerRole, service
   const filtered = filterMember
     ? websites.filter((w) => w.assignedTo.some((a) => a.userId === filterMember))
     : websites;
+
+  const automationEnabledCount = websites.filter((w) => w.automationEnabled).length;
+
+  function toggleSelect(id: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleSelectAll() {
+    setSelected((prev) =>
+      prev.size === filtered.length ? new Set() : new Set(filtered.map((w) => w.id))
+    );
+  }
+
+  async function runBulkAction() {
+    if (!bulkAction || selected.size === 0) return;
+    setBulkBusy(true);
+    const res = await fetch("/api/websites/bulk", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids: Array.from(selected), action: bulkAction }),
+    });
+    setBulkBusy(false);
+    setBulkAction(null);
+
+    if (!res.ok) {
+      setBulkResult({ succeeded: 0, skipped: [{ name: "", reason: (await res.json()).error ?? "Something went wrong." }] });
+      return;
+    }
+
+    const data: { succeeded: string[]; skipped: { id: string; name: string; reason: string }[] } = await res.json();
+    setBulkResult({ succeeded: data.succeeded.length, skipped: data.skipped });
+    setSelected(new Set());
+    router.refresh();
+
+    if (bulkAction === "delete") {
+      setWebsites((prev) => prev.filter((w) => !data.succeeded.includes(w.id)));
+    } else {
+      setWebsites((prev) =>
+        prev.map((w) =>
+          data.succeeded.includes(w.id)
+            ? { ...w, automationEnabled: bulkAction === "enableAutomation" }
+            : w
+        )
+      );
+    }
+  }
 
   function onAdded(w: WebsiteRow) {
     setWebsites((prev) => [w, ...prev].sort((a, b) => a.name.localeCompare(b.name)));
@@ -118,7 +172,7 @@ export function WebsitesClient({ websites: initial, members, viewerRole, service
               <select
                 value={filterMember}
                 onChange={(e) => setFilterMember(e.target.value)}
-                className="h-9 rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className="h-9 rounded-lg border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 <option value="">All members</option>
                 {members.map((m) => (
@@ -141,9 +195,78 @@ export function WebsitesClient({ websites: initial, members, viewerRole, service
         </div>
       </div>
 
+      {/* Stat cards */}
+      <div className={cn("grid gap-3", isSuperAdmin ? "grid-cols-2 sm:grid-cols-2 max-w-md" : "grid-cols-1 max-w-xs")}>
+        <div className="rounded-xl border border-border bg-card p-4 flex items-center gap-3">
+          <div className="rounded-lg bg-primary/10 p-2.5 shrink-0">
+            <Globe className="h-4 w-4 text-primary" />
+          </div>
+          <div>
+            <p className="text-2xl font-bold leading-none">{websites.length}</p>
+            <p className="text-xs text-muted-foreground mt-1">Total Websites</p>
+          </div>
+        </div>
+        {isSuperAdmin && (
+          <div className="rounded-xl border border-border bg-card p-4 flex items-center gap-3">
+            <div className="rounded-lg bg-violet-500/10 p-2.5 shrink-0">
+              <Zap className="h-4 w-4 text-violet-600" />
+            </div>
+            <div>
+              <p className="text-2xl font-bold leading-none">{automationEnabledCount}</p>
+              <p className="text-xs text-muted-foreground mt-1">Automation Enabled</p>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Bulk action bar */}
+      {isSuperAdmin && selected.size > 0 && (
+        <div className="flex items-center gap-3 rounded-xl border border-primary/30 bg-primary/5 px-4 py-2.5 flex-wrap">
+          <p className="text-sm font-medium text-foreground">{selected.size} selected</p>
+          <div className="flex gap-2 ml-auto flex-wrap">
+            <Button size="sm" variant="outline" onClick={() => setBulkAction("enableAutomation")}>
+              <Zap className="h-3.5 w-3.5" /> Enable Automation
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => setBulkAction("disableAutomation")}>
+              Disable Automation
+            </Button>
+            <Button size="sm" variant="destructive" onClick={() => setBulkAction("delete")}>
+              <Trash2 className="h-3.5 w-3.5" /> Delete
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => setSelected(new Set())}>Clear</Button>
+          </div>
+        </div>
+      )}
+
+      {/* Bulk result summary */}
+      {bulkResult && (
+        <div className="rounded-xl border border-border bg-card p-4 space-y-2">
+          <div className="flex items-start justify-between gap-3">
+            <p className="text-sm text-foreground">
+              {bulkResult.succeeded > 0 && <span className="font-medium">{bulkResult.succeeded} site{bulkResult.succeeded !== 1 ? "s" : ""} updated.</span>}
+              {bulkResult.succeeded > 0 && bulkResult.skipped.length > 0 && " "}
+              {bulkResult.skipped.length > 0 && <span className="text-amber-700 dark:text-amber-400">{bulkResult.skipped.length} skipped.</span>}
+            </p>
+            <button onClick={() => setBulkResult(null)} className="text-muted-foreground hover:text-foreground shrink-0">
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+          {bulkResult.skipped.length > 0 && (
+            <ul className="text-xs text-muted-foreground space-y-1">
+              {bulkResult.skipped.map((s, i) => (
+                <li key={i} className="flex items-start gap-1.5">
+                  <AlertTriangle className="h-3 w-3 text-amber-500 mt-0.5 shrink-0" />
+                  {s.name ? <span><span className="font-medium text-foreground">{s.name}</span>: {s.reason}</span> : s.reason}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+
       {/* List */}
       {filtered.length === 0 ? (
-        <div className="rounded-lg border bg-card p-12 text-center">
+        <div className="rounded-xl border border-border bg-card p-12 text-center">
           <Globe className="h-8 w-8 text-muted-foreground/30 mx-auto mb-3" />
           <p className="text-sm text-muted-foreground">
             {websites.length === 0
@@ -152,24 +275,46 @@ export function WebsitesClient({ websites: initial, members, viewerRole, service
           </p>
         </div>
       ) : (
-        <div className="rounded-lg border bg-card shadow-sm overflow-hidden">
+        <div className="rounded-xl border border-border bg-card shadow-sm overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b bg-muted/40">
-                <th className="text-left px-4 py-3 font-medium text-muted-foreground text-xs uppercase tracking-wide">Website</th>
-                <th className="text-left px-4 py-3 font-medium text-muted-foreground text-xs uppercase tracking-wide">URL</th>
-                <th className="text-left px-4 py-3 font-medium text-muted-foreground text-xs uppercase tracking-wide">Assigned Members</th>
+              <tr className="border-b border-border bg-muted/40">
+                {isSuperAdmin && (
+                  <th className="px-4 py-3 w-10">
+                    <input
+                      type="checkbox"
+                      checked={filtered.length > 0 && selected.size === filtered.length}
+                      onChange={toggleSelectAll}
+                      className="h-4 w-4 rounded border-input accent-primary cursor-pointer"
+                      aria-label="Select all websites"
+                    />
+                  </th>
+                )}
+                <th className="text-left px-4 py-3 font-medium text-muted-foreground text-xs uppercase tracking-wide whitespace-nowrap">Website</th>
+                <th className="text-left px-4 py-3 font-medium text-muted-foreground text-xs uppercase tracking-wide whitespace-nowrap">URL</th>
+                <th className="text-left px-4 py-3 font-medium text-muted-foreground text-xs uppercase tracking-wide whitespace-nowrap">Assigned Members</th>
                 {isSuperAdmin && <th className="px-4 py-3 w-36" />}
               </tr>
             </thead>
-            <tbody className="divide-y">
+            <tbody className="divide-y divide-border">
               {filtered.map((w) => (
                 <tr key={w.id} className="hover:bg-muted/20 transition-colors group">
-                  <td className="px-4 py-3 font-medium">
+                  {isSuperAdmin && (
+                    <td className="px-4 py-3">
+                      <input
+                        type="checkbox"
+                        checked={selected.has(w.id)}
+                        onChange={() => toggleSelect(w.id)}
+                        className="h-4 w-4 rounded border-input accent-primary cursor-pointer"
+                        aria-label={`Select ${w.name}`}
+                      />
+                    </td>
+                  )}
+                  <td className="px-4 py-3 font-medium whitespace-nowrap">
                     <div className="flex items-center gap-2">
                       {w.name}
                       {w.automationEnabled && (
-                        <span className="inline-flex items-center gap-1 rounded-full bg-violet-50 px-2 py-0.5 text-xs font-medium text-violet-600 border border-violet-200">
+                        <span className="inline-flex items-center gap-1 rounded-full bg-violet-500/10 px-2 py-0.5 text-xs font-medium text-violet-600 border border-violet-500/20">
                           <Zap className="h-3 w-3" />
                           Auto
                         </span>
@@ -179,7 +324,7 @@ export function WebsitesClient({ websites: initial, members, viewerRole, service
                   <td className="px-4 py-3 text-muted-foreground">
                     {w.url ? (
                       <a href={w.url} target="_blank" rel="noopener noreferrer"
-                        className="flex items-center gap-1 text-blue-600 hover:underline text-xs max-w-[220px]">
+                        className="flex items-center gap-1 text-primary hover:underline text-xs max-w-[220px]">
                         <span className="truncate">{w.url.replace(/^https?:\/\/(www\.)?/, "")}</span>
                         <ExternalLink className="h-3 w-3 shrink-0" />
                       </a>
@@ -194,7 +339,7 @@ export function WebsitesClient({ websites: initial, members, viewerRole, service
                       <div className="flex flex-wrap gap-1">
                         {w.assignedTo.map((a) => (
                           <span key={a.userId}
-                            className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium">
+                            className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium whitespace-nowrap">
                             {a.userName}
                           </span>
                         ))}
@@ -203,8 +348,8 @@ export function WebsitesClient({ websites: initial, members, viewerRole, service
                   </td>
                   {isSuperAdmin && (
                     <td className="px-4 py-3">
-                      <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity justify-end">
-                        <Button variant="ghost" size="sm" className="h-7 px-2 text-xs gap-1 text-violet-600 hover:text-violet-700 hover:bg-violet-50"
+                      <div className="flex gap-1 justify-end">
+                        <Button variant="ghost" size="sm" className="h-7 px-2 text-xs gap-1 text-violet-600 hover:text-violet-700 hover:bg-violet-500/10"
                           onClick={() => setAutoItem(w)}>
                           <Zap className="h-3.5 w-3.5" />
                           Automation
@@ -235,7 +380,10 @@ export function WebsitesClient({ websites: initial, members, viewerRole, service
       {/* Add dialog */}
       <Dialog open={addOpen} onOpenChange={setAddOpen}>
         <DialogContent className="max-w-md">
-          <DialogHeader><DialogTitle>Add Website</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle>Add Website</DialogTitle>
+            <DialogDescription>Register a new website to track and manage.</DialogDescription>
+          </DialogHeader>
           <WebsiteForm onSaved={onAdded} onCancel={() => setAddOpen(false)} />
         </DialogContent>
       </Dialog>
@@ -243,7 +391,10 @@ export function WebsitesClient({ websites: initial, members, viewerRole, service
       {/* Edit dialog */}
       <Dialog open={!!editItem} onOpenChange={(o) => { if (!o) setEditItem(null); }}>
         <DialogContent className="max-w-md">
-          <DialogHeader><DialogTitle>Edit Website</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle>Edit Website</DialogTitle>
+            <DialogDescription>Update this website&apos;s name and URL.</DialogDescription>
+          </DialogHeader>
           {editItem && (
             <WebsiteForm existing={editItem} onSaved={onEdited} onCancel={() => setEditItem(null)} />
           )}
@@ -258,6 +409,7 @@ export function WebsitesClient({ websites: initial, members, viewerRole, service
               <Users className="h-4 w-4" />
               Assign Members — {assignItem?.name}
             </DialogTitle>
+            <DialogDescription>Choose which team members work on this website.</DialogDescription>
           </DialogHeader>
           {assignItem && (
             <AssignForm
@@ -278,6 +430,7 @@ export function WebsitesClient({ websites: initial, members, viewerRole, service
               <Zap className="h-4 w-4 text-violet-600" />
               Automation Settings — {autoItem?.name}
             </DialogTitle>
+            <DialogDescription>Configure scheduled sitemap scraping and URL indexing for this website.</DialogDescription>
           </DialogHeader>
           {autoItem && (
             <AutomationForm
@@ -290,11 +443,37 @@ export function WebsitesClient({ websites: initial, members, viewerRole, service
         </DialogContent>
       </Dialog>
 
+      {/* Bulk action confirm */}
+      <Dialog open={!!bulkAction} onOpenChange={(o) => { if (!o) setBulkAction(null); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>
+              {bulkAction === "delete" ? "Delete selected websites?" : bulkAction === "enableAutomation" ? "Enable automation?" : "Disable automation?"}
+            </DialogTitle>
+            <DialogDescription>
+              {bulkAction === "delete"
+                ? `This will permanently delete ${selected.size} website${selected.size !== 1 ? "s" : ""} and all their assignments and indexing data. This cannot be undone.`
+                : bulkAction === "enableAutomation"
+                ? `Automation will be enabled for ${selected.size} website${selected.size !== 1 ? "s" : ""} that already have a GSC service account configured. Sites without one will be skipped.`
+                : `Automation will be disabled for ${selected.size} website${selected.size !== 1 ? "s" : ""}.`}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex gap-2 justify-end mt-2">
+            <Button variant="outline" onClick={() => setBulkAction(null)} disabled={bulkBusy}>Cancel</Button>
+            <Button variant={bulkAction === "delete" ? "destructive" : "default"} onClick={runBulkAction} disabled={bulkBusy}>
+              {bulkBusy && <Loader2 className="h-4 w-4 animate-spin" />} Confirm
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       {/* Delete confirm */}
       <Dialog open={!!deleteId} onOpenChange={(o) => { if (!o) setDeleteId(null); }}>
         <DialogContent className="max-w-sm">
-          <DialogHeader><DialogTitle>Delete website?</DialogTitle></DialogHeader>
-          <p className="text-sm text-muted-foreground">This will permanently delete the website and all its assignments.</p>
+          <DialogHeader>
+            <DialogTitle>Delete website?</DialogTitle>
+            <DialogDescription>This will permanently delete the website and all its assignments.</DialogDescription>
+          </DialogHeader>
           <div className="flex gap-2 justify-end mt-2">
             <Button variant="outline" onClick={() => setDeleteId(null)} disabled={deleting}>Cancel</Button>
             <Button variant="destructive" onClick={confirmDelete} disabled={deleting}>
@@ -461,7 +640,7 @@ function AutomationForm({ website, serviceAccountNames, onSaved, onCancel }: {
           type="datetime-local"
           value={startDate}
           onChange={(e) => setStartDate(e.target.value)}
-          className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="w-full h-10 rounded-lg border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         />
         <p className="text-xs text-muted-foreground">
           Leave blank to start immediately. If set, cron will skip this website until the selected date &amp; time.
@@ -592,7 +771,7 @@ function SearchableSelect({ options, value, onChange, placeholder }: {
       <button
         type="button"
         onClick={() => { setOpen((v) => !v); setSearch(""); }}
-        className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm text-left flex items-center justify-between focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className="w-full h-10 rounded-lg border border-input bg-background px-3 text-sm text-left flex items-center justify-between focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
         <span className={value ? "text-foreground" : "text-muted-foreground"}>
           {value || placeholder}
@@ -603,15 +782,15 @@ function SearchableSelect({ options, value, onChange, placeholder }: {
       </button>
 
       {open && (
-        <div className="absolute z-50 mt-1 w-full rounded-md border bg-popover shadow-md">
-          <div className="p-2 border-b">
+        <div className="absolute z-50 mt-1 w-full rounded-lg border border-border bg-popover shadow-md">
+          <div className="p-2 border-b border-border">
             <input
               autoFocus
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Search..."
-              className="w-full h-8 rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className="w-full h-8 rounded-lg border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             />
           </div>
           <ul className="max-h-48 overflow-y-auto py-1">

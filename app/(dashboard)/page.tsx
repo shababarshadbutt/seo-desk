@@ -111,7 +111,7 @@ export default async function OverviewPage({
 
       {/* ── Header ── */}
       <div>
-        <h2 className="text-2xl font-bold">
+        <h2 className="text-2xl font-bold text-foreground">
           Welcome back, {session?.user?.name?.split(" ")[0]}
         </h2>
         <p className="text-muted-foreground text-sm mt-1">{roleSubtitle}</p>
@@ -134,17 +134,19 @@ export default async function OverviewPage({
         )}
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
           {([
-            { label: "Total Runs", value: execTotal,   icon: ScrollText,  color: "text-blue-600",   bg: "bg-blue-50 border-blue-200"     },
-            { label: "Successful", value: execSuccess,  icon: CheckCircle, color: "text-green-600",  bg: "bg-green-50 border-green-200"   },
-            { label: "Failed",     value: execError,    icon: XCircle,     color: "text-red-600",    bg: "bg-red-50 border-red-200"       },
-            { label: "Running",    value: execRunning,  icon: Play,        color: "text-yellow-600", bg: "bg-yellow-50 border-yellow-200" },
-          ] as const).map(({ label, value, icon: Icon, color, bg }) => (
-            <div key={label} className={cn("rounded-lg border p-4", bg)}>
+            { label: "Total Runs", value: execTotal,   icon: ScrollText,  accent: "text-primary bg-primary/10" },
+            { label: "Successful", value: execSuccess,  icon: CheckCircle, accent: "text-emerald-600 bg-emerald-500/10" },
+            { label: "Failed",     value: execError,    icon: XCircle,     accent: "text-rose-600 bg-rose-500/10" },
+            { label: "Running",    value: execRunning,  icon: Play,        accent: "text-amber-600 bg-amber-500/10" },
+          ] as const).map(({ label, value, icon: Icon, accent }) => (
+            <div key={label} className="rounded-xl border border-border bg-card p-4 shadow-sm">
               <div className="flex items-center justify-between">
-                <p className={cn("text-xs font-medium", color)}>{label}</p>
-                <Icon className={cn("h-4 w-4", color)} />
+                <p className="text-xs font-medium text-muted-foreground">{label}</p>
+                <span className={cn("flex h-7 w-7 items-center justify-center rounded-lg", accent)}>
+                  <Icon className="h-4 w-4" />
+                </span>
               </div>
-              <p className="mt-2 text-3xl font-bold">{value as number}</p>
+              <p className="mt-2 text-3xl font-bold text-foreground">{value as number}</p>
             </div>
           ))}
         </div>
@@ -157,14 +159,14 @@ export default async function OverviewPage({
         </h3>
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
           {([
-            { label: "Total",   value: blTotal,   color: "text-blue-600",   bg: "bg-blue-50 border-blue-200"     },
-            { label: "Live",    value: blLive,    color: "text-green-600",  bg: "bg-green-50 border-green-200"   },
-            { label: "Pending", value: blPending, color: "text-yellow-600", bg: "bg-yellow-50 border-yellow-200" },
-            { label: "Broken",  value: blBroken,  color: "text-red-600",    bg: "bg-red-50 border-red-200"       },
-          ] as const).map(({ label, value, color, bg }) => (
-            <div key={label} className={cn("rounded-lg border p-4", bg)}>
-              <p className={cn("text-xs font-medium", color)}>{label}</p>
-              <p className="mt-2 text-3xl font-bold">{value as number}</p>
+            { label: "Total",   value: blTotal,   accent: "text-primary" },
+            { label: "Live",    value: blLive,    accent: "text-emerald-600" },
+            { label: "Pending", value: blPending, accent: "text-amber-600" },
+            { label: "Broken",  value: blBroken,  accent: "text-rose-600" },
+          ] as const).map(({ label, value, accent }) => (
+            <div key={label} className="rounded-xl border border-border bg-card p-4 shadow-sm">
+              <p className={cn("text-xs font-medium", accent)}>{label}</p>
+              <p className="mt-2 text-3xl font-bold text-foreground">{value as number}</p>
             </div>
           ))}
         </div>
@@ -177,15 +179,15 @@ export default async function OverviewPage({
         </h3>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           {contentStats.map((s) => (
-            <div key={s.type} className="rounded-lg border bg-card p-4 shadow-sm">
+            <div key={s.type} className="rounded-xl border border-border bg-card p-4 shadow-sm">
               <div className="flex items-start justify-between gap-2 mb-3">
-                <p className="font-medium text-sm leading-snug">{s.label}</p>
-                <span className="text-2xl font-bold shrink-0">{s.total}</span>
+                <p className="font-medium text-sm leading-snug text-foreground">{s.label}</p>
+                <span className="text-2xl font-bold shrink-0 text-foreground">{s.total}</span>
               </div>
               <div className="flex gap-4 text-xs">
-                <span className="text-yellow-700 font-medium">{s.pending} Pending</span>
-                <span className="text-blue-700 font-medium">{s.inProgress} In Progress</span>
-                <span className="text-green-700 font-medium">{s.done} Done</span>
+                <span className="text-amber-600 font-medium">{s.pending} Pending</span>
+                <span className="text-primary font-medium">{s.inProgress} In Progress</span>
+                <span className="text-emerald-600 font-medium">{s.done} Done</span>
               </div>
             </div>
           ))}
@@ -194,9 +196,9 @@ export default async function OverviewPage({
 
       {/* ── Recent Script Runs ── */}
       <section>
-        <div className="rounded-lg border bg-card shadow-sm">
-          <div className="border-b px-4 py-3">
-            <h3 className="font-semibold text-sm">
+        <div className="rounded-xl border border-border bg-card shadow-sm">
+          <div className="border-b border-border px-4 py-3">
+            <h3 className="font-semibold text-sm text-foreground">
               {isFiltered ? "Filtered Script Runs" : "Recent Script Runs"}
             </h3>
           </div>
@@ -205,11 +207,11 @@ export default async function OverviewPage({
               {isFiltered ? "No runs in this date range." : "No executions yet."}
             </p>
           ) : (
-            <div className="divide-y">
+            <div className="divide-y divide-border">
               {(recentRuns as { _id: { toString(): string }; scriptName: string; userName: string; startedAt: Date; status: string; durationMs?: number | null }[]).map((log) => (
                 <div key={log._id.toString()} className="flex items-center justify-between px-4 py-3 text-sm">
                   <div>
-                    <p className="font-medium">{log.scriptName}</p>
+                    <p className="font-medium text-foreground">{log.scriptName}</p>
                     <p className="text-xs text-muted-foreground">
                       {role !== "admin" && `${log.userName} · `}
                       {new Date(log.startedAt).toLocaleString()}

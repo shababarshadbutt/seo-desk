@@ -71,17 +71,17 @@ export default async function WebsiteQueuePage({ params }: { params: { websiteId
           <div className="flex items-center gap-2 mb-1">
             <Link
               href="/indexing-queue"
-              className="text-sm text-gray-500 hover:text-gray-700 transition-colors"
+              className="text-sm text-muted-foreground hover:text-foreground transition-colors"
             >
               ← Indexing Queue
             </Link>
           </div>
-          <h1 className="text-2xl font-bold text-gray-900">{website.name}</h1>
+          <h1 className="text-2xl font-bold text-foreground">{website.name}</h1>
           <a
             href={website.url}
             target="_blank"
             rel="noreferrer"
-            className="text-sm text-blue-600 hover:underline"
+            className="text-sm text-primary hover:underline"
           >
             {website.url}
           </a>
@@ -90,13 +90,13 @@ export default async function WebsiteQueuePage({ params }: { params: { websiteId
 
       {/* Stats bar */}
       <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
-        <StatCard label="Total URLs"     value={s.total}         color="gray" />
-        <StatCard label="GSC Submitted"  value={s.gscSubmitted}  color="green" />
-        <StatCard label="GSC Pending"    value={s.gscPending}    color="yellow" />
-        <StatCard label="GSC Failed"     value={s.gscFailed}     color="red" />
-        <StatCard label="Bing Submitted" value={s.bingSubmitted} color="green" />
-        <StatCard label="Bing Pending"   value={s.bingPending}   color="yellow" />
-        <StatCard label="Bing Failed"    value={s.bingFailed}    color="red" />
+        <StatCard label="Total URLs"     value={s.total}         color="primary" />
+        <StatCard label="GSC Submitted"  value={s.gscSubmitted}  color="emerald" />
+        <StatCard label="GSC Pending"    value={s.gscPending}    color="amber" />
+        <StatCard label="GSC Failed"     value={s.gscFailed}     color="rose" />
+        <StatCard label="Bing Submitted" value={s.bingSubmitted} color="emerald" />
+        <StatCard label="Bing Pending"   value={s.bingPending}   color="amber" />
+        <StatCard label="Bing Failed"    value={s.bingFailed}    color="rose" />
       </div>
 
       {/* Client component: sitemaps, filters, URL table, pagination */}
@@ -125,15 +125,15 @@ export default async function WebsiteQueuePage({ params }: { params: { websiteId
   );
 }
 
-function StatCard({ label, value, color }: { label: string; value: number; color: "gray" | "green" | "yellow" | "red" }) {
+function StatCard({ label, value, color }: { label: string; value: number; color: "primary" | "emerald" | "amber" | "rose" }) {
   const cls = {
-    gray:   "bg-gray-50  text-gray-900",
-    green:  "bg-green-50 text-green-800",
-    yellow: "bg-yellow-50 text-yellow-800",
-    red:    "bg-red-50   text-red-800",
+    primary: "bg-primary/10 text-primary",
+    emerald: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
+    amber:   "bg-amber-500/10 text-amber-700 dark:text-amber-400",
+    rose:    "bg-rose-500/10 text-rose-700 dark:text-rose-400",
   }[color];
   return (
-    <div className={`rounded-lg border border-gray-200 px-4 py-3 ${cls}`}>
+    <div className={`rounded-xl border border-border px-4 py-3 ${cls}`}>
       <div className="text-xl font-bold">{value.toLocaleString()}</div>
       <div className="text-xs mt-0.5 opacity-70">{label}</div>
     </div>

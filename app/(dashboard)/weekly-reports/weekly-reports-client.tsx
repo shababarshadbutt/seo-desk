@@ -1,12 +1,14 @@
 "use client";
 
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Pencil, Trash2, Loader2, ChevronDown, ChevronRight, BarChart2 } from "lucide-react";
+import { Plus, Pencil, Trash2, Loader2, ChevronDown, ChevronRight, BarChart2, Download, Sparkles } from "lucide-react";
+import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { useFunctionalityStub, FunctionalityStubToast } from "@/components/functionality-stub";
 import { cn } from "@/lib/utils";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -144,6 +146,7 @@ export function WeeklyReportsClient({ reports: initial, assignedWebsites, member
   const isSuperAdmin = viewerRole === "super-admin";
   const canSubmit    = viewerRole !== "super-admin";
   const showGrouped  = viewerRole === "super-admin" || viewerRole === "sub-lead";
+  const stub = useFunctionalityStub();
 
   function onSavedMany(rows: WeeklyReportRow[]) {
     setReports((prev) => {
@@ -195,6 +198,26 @@ export function WeeklyReportsClient({ reports: initial, assignedWebsites, member
     .filter((r) => r.userId === currentUserId)
     .sort((a, b) => b.weekStart.localeCompare(a.weekStart));
 
+  // Weekly trend chart data — real, computed from whatever this viewer can already
+  // see (filteredReports for super-admin/sub-lead, ownReports for a regular member).
+  // Last 12 weeks only, so the chart stays readable.
+  const chartSourceRows = showGrouped ? filteredReports : ownReports;
+  const chartData = Array.from(
+    chartSourceRows.reduce((map, r) => {
+      const cur = map.get(r.weekStart) ?? { weekStart: r.weekStart, clicks: 0, impressions: 0, indexation: 0, rfqs: 0 };
+      cur.clicks += r.clicks;
+      cur.impressions += r.impressions;
+      cur.indexation += r.indexation;
+      cur.rfqs += r.rfqs;
+      map.set(r.weekStart, cur);
+      return map;
+    }, new Map<string, { weekStart: string; clicks: number; impressions: number; indexation: number; rfqs: number }>())
+      .values()
+  )
+    .sort((a, b) => a.weekStart.localeCompare(b.weekStart))
+    .slice(-12)
+    .map((d) => ({ ...d, label: formatWeekRange(d.weekStart) }));
+
   return (
     <div className="space-y-5">
 
@@ -206,13 +229,51 @@ export function WeeklyReportsClient({ reports: initial, assignedWebsites, member
             {isSuperAdmin ? `${reports.length} entries across all members` : "Track weekly website performance"}
           </p>
         </div>
-        {canSubmit && (
-          <Button onClick={() => setAddOpen(true)}>
-            <Plus className="h-4 w-4" />
-            Add Weekly Report
+        <div className="flex gap-2 flex-wrap">
+          {showGrouped && (
+            <Button
+              variant="outline"
+              onClick={() => stub.show("AI summaries are coming soon — this will need an LLM API key configured first.")}
+            >
+              <Sparkles className="h-4 w-4" />
+              AI Executive Summary
+            </Button>
+          )}
+          <Button variant="outline" asChild>
+            <a href="/api/weekly-reports/export">
+              <Download className="h-4 w-4" />
+              Export CSV
+            </a>
           </Button>
-        )}
+          {canSubmit && (
+            <Button onClick={() => setAddOpen(true)}>
+              <Plus className="h-4 w-4" />
+              Add Weekly Report
+            </Button>
+          )}
+        </div>
       </div>
+
+      {/* Weekly trend chart — real data, computed client-side from what this viewer can see */}
+      {chartData.length > 0 && (
+        <div className="rounded-xl border bg-card shadow-sm p-4">
+          <p className="text-sm font-semibold mb-3">Weekly Output Velocity</p>
+          <ResponsiveContainer width="100%" height={240}>
+            <BarChart data={chartData} margin={{ top: 4, right: 8, left: -16, bottom: 4 }}>
+              <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
+              <XAxis dataKey="label" tick={{ fontSize: 11 }} />
+              <YAxis tick={{ fontSize: 11 }} />
+              <Tooltip
+                contentStyle={{ fontSize: 12, borderRadius: 8 }}
+                wrapperClassName="!bg-popover"
+              />
+              <Legend wrapperStyle={{ fontSize: 12 }} />
+              <Bar dataKey="clicks" name="Clicks" fill="hsl(var(--primary))" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="rfqs" name="RFQs" fill="#f59e0b" radius={[4, 4, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      )}
 
       {/* Filters for grouped view */}
       {showGrouped && (
@@ -223,7 +284,7 @@ export function WeeklyReportsClient({ reports: initial, assignedWebsites, member
               <select
                 value={filterMember}
                 onChange={(e) => setFilterMember(e.target.value)}
-                className="h-9 rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className="h-9 rounded-lg border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 <option value="">All members</option>
                 {members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
@@ -235,7 +296,7 @@ export function WeeklyReportsClient({ reports: initial, assignedWebsites, member
             <select
               value={filterMonth}
               onChange={(e) => setFilterMonth(e.target.value)}
-              className="h-9 rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className="h-9 rounded-lg border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
               <option value="">All months</option>
               {allMonths.map((mk) => <option key={mk} value={mk}>{monthLabel(mk)}</option>)}
@@ -252,7 +313,7 @@ export function WeeklyReportsClient({ reports: initial, assignedWebsites, member
       {/* ── Grouped view (super-admin + sub-lead) ── */}
       {showGrouped && (
         grouped.size === 0 ? (
-          <div className="rounded-lg border bg-card p-12 text-center">
+          <div className="rounded-xl border bg-card p-12 text-center">
             <BarChart2 className="h-8 w-8 text-muted-foreground/30 mx-auto mb-3" />
             <p className="text-sm text-muted-foreground">No weekly reports found.</p>
           </div>
@@ -282,13 +343,13 @@ export function WeeklyReportsClient({ reports: initial, assignedWebsites, member
           )}
           {ownReports.length === 0 ? (
             !showGrouped && (
-              <div className="rounded-lg border bg-card p-12 text-center">
+              <div className="rounded-xl border bg-card p-12 text-center">
                 <BarChart2 className="h-8 w-8 text-muted-foreground/30 mx-auto mb-3" />
                 <p className="text-sm text-muted-foreground">No weekly reports submitted yet.</p>
               </div>
             )
           ) : (
-            <div className="rounded-lg border bg-card shadow-sm overflow-hidden">
+            <div className="rounded-xl border bg-card shadow-sm overflow-hidden">
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
@@ -310,7 +371,7 @@ export function WeeklyReportsClient({ reports: initial, assignedWebsites, member
                           <td key={c} className="px-4 py-3 text-right tabular-nums">{getVal(r, c).toLocaleString()}</td>
                         ))}
                         <td className="px-4 py-3">
-                          <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity justify-end">
+                          <div className="flex gap-1 justify-end">
                             <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => setEditItem(r)}>
                               <Pencil className="h-3.5 w-3.5" />
                             </Button>
@@ -332,7 +393,10 @@ export function WeeklyReportsClient({ reports: initial, assignedWebsites, member
       {/* ── Add dialog (bulk: all websites at once) ── */}
       <Dialog open={addOpen} onOpenChange={setAddOpen}>
         <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader><DialogTitle>Add Weekly Report</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle>Add Weekly Report</DialogTitle>
+            <DialogDescription>Submit this week&apos;s performance numbers for your assigned websites.</DialogDescription>
+          </DialogHeader>
           <BulkReportForm
             assignedWebsites={assignedWebsites}
             onSaved={onSavedMany}
@@ -344,7 +408,10 @@ export function WeeklyReportsClient({ reports: initial, assignedWebsites, member
       {/* ── Edit dialog (single row) ── */}
       <Dialog open={!!editItem} onOpenChange={(o) => { if (!o) setEditItem(null); }}>
         <DialogContent className="max-w-lg">
-          <DialogHeader><DialogTitle>Edit Weekly Report</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle>Edit Weekly Report</DialogTitle>
+            <DialogDescription>Update this report&apos;s metrics.</DialogDescription>
+          </DialogHeader>
           {editItem && (
             <EditForm
               key={editItem.id}
@@ -358,8 +425,10 @@ export function WeeklyReportsClient({ reports: initial, assignedWebsites, member
 
       <Dialog open={!!deleteId} onOpenChange={(o) => { if (!o) setDeleteId(null); }}>
         <DialogContent className="max-w-sm">
-          <DialogHeader><DialogTitle>Delete this report?</DialogTitle></DialogHeader>
-          <p className="text-sm text-muted-foreground">This action cannot be undone.</p>
+          <DialogHeader>
+            <DialogTitle>Delete this report?</DialogTitle>
+            <DialogDescription>This action cannot be undone.</DialogDescription>
+          </DialogHeader>
           <div className="flex gap-2 justify-end mt-2">
             <Button variant="outline" onClick={() => setDeleteId(null)} disabled={deleting}>Cancel</Button>
             <Button variant="destructive" onClick={confirmDelete} disabled={deleting}>
@@ -368,6 +437,8 @@ export function WeeklyReportsClient({ reports: initial, assignedWebsites, member
           </div>
         </DialogContent>
       </Dialog>
+
+      <FunctionalityStubToast message={stub.message} onDismiss={stub.dismiss} />
     </div>
   );
 }
@@ -389,7 +460,7 @@ function MemberSection({ userId, userName, byMonth, currentUserId, isSuperAdmin,
   const grandTotal = sumRows(allRows);
 
   return (
-    <div className="rounded-lg border bg-card shadow-sm overflow-hidden">
+    <div className="rounded-xl border bg-card shadow-sm overflow-hidden">
       {/* Member header */}
       <button
         onClick={() => setOpen((v) => !v)}
@@ -474,7 +545,7 @@ function MonthSection({ monthKey, byWeek, userId, currentUserId, isSuperAdmin, o
               {Array.from(byWeek.entries()).sort(([a], [b]) => b.localeCompare(a)).map(([weekStart, rows]) => {
                 const weekTotal = sumRows(rows);
                 return (
-                  <>
+                  <Fragment key={weekStart}>
                     {rows.map((r) => (
                       <tr key={r.id} className="hover:bg-muted/10 transition-colors group">
                         <td className="px-5 py-2 text-xs text-muted-foreground whitespace-nowrap">{formatWeekRange(weekStart)}</td>
@@ -484,7 +555,7 @@ function MonthSection({ monthKey, byWeek, userId, currentUserId, isSuperAdmin, o
                         ))}
                         {canModify && (
                           <td className="px-4 py-2">
-                            <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity justify-end">
+                            <div className="flex gap-1 justify-end">
                               <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => onEdit(r)}>
                                 <Pencil className="h-3 w-3" />
                               </Button>
@@ -498,18 +569,18 @@ function MonthSection({ monthKey, byWeek, userId, currentUserId, isSuperAdmin, o
                     ))}
                     {/* Week total row */}
                     {rows.length > 1 && (
-                      <tr className="bg-blue-50/50 border-t">
-                        <td className="px-5 py-1.5 text-xs font-semibold text-blue-700">Week Total</td>
+                      <tr className="bg-primary/5 border-t">
+                        <td className="px-5 py-1.5 text-xs font-semibold text-primary">Week Total</td>
                         <td className="px-4 py-1.5" />
                         {COLS.map((c) => (
-                          <td key={c} className="px-4 py-1.5 text-right tabular-nums text-xs font-semibold text-blue-700">
+                          <td key={c} className="px-4 py-1.5 text-right tabular-nums text-xs font-semibold text-primary">
                             {(weekTotal as Record<string, number>)[c.toLowerCase()].toLocaleString()}
                           </td>
                         ))}
                         {canModify && <td />}
                       </tr>
                     )}
-                  </>
+                  </Fragment>
                 );
               })}
               {/* Month total row */}
@@ -548,7 +619,7 @@ function BulkReportForm({ assignedWebsites, onSaved, onCancel }: {
   const [loading, setLoading] = useState(false);
   const [error, setError]     = useState("");
 
-  const selectClass = "h-9 w-full rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
+  const selectClass = "h-9 w-full rounded-lg border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
 
   function setField(wId: string, field: keyof WebsiteFields, value: string) {
     setData((prev) => ({ ...prev, [wId]: { ...prev[wId], [field]: value } }));
@@ -608,7 +679,7 @@ function BulkReportForm({ assignedWebsites, onSaved, onCancel }: {
       </div>
 
       {/* Per-website rows */}
-      <div className="rounded-md border overflow-hidden">
+      <div className="rounded-xl border overflow-hidden">
         <table className="w-full text-sm">
           <thead>
             <tr className="bg-muted/40 border-b">
@@ -692,7 +763,7 @@ function EditForm({ existing, onSaved, onCancel }: {
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
-      <div className="rounded-md bg-muted/40 px-3 py-2 text-sm">
+      <div className="rounded-lg bg-muted/40 px-3 py-2 text-sm">
         <span className="text-muted-foreground">Website: </span>
         <span className="font-medium">{existing.websiteName}</span>
         <span className="text-muted-foreground ml-3">Week: </span>

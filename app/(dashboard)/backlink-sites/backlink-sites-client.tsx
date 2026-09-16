@@ -6,8 +6,8 @@ import { Plus, Trash2, Loader2, Link2, ExternalLink, ClipboardPaste, X, Check, R
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 
 export interface BacklinkSiteRow {
@@ -99,16 +99,16 @@ export function BacklinkSitesClient({ sites: initial, viewerRole, currentUserId 
 
       {/* Table */}
       {sites.length === 0 ? (
-        <div className="rounded-lg border bg-card p-12 text-center">
+        <div className="rounded-xl border border-border bg-card p-12 text-center">
           <Link2 className="h-8 w-8 text-muted-foreground/30 mx-auto mb-3" />
           <p className="text-sm text-muted-foreground">No approved sites yet. Add the first one.</p>
         </div>
       ) : (
-        <div className="rounded-lg border bg-card shadow-sm overflow-hidden">
+        <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b bg-muted/40">
+                <tr className="border-b border-border bg-muted/40">
                   <th className="text-left px-4 py-3 font-medium text-muted-foreground text-xs uppercase tracking-wide">URL</th>
                   <th className="text-center px-4 py-3 font-medium text-muted-foreground text-xs uppercase tracking-wide">DA</th>
                   <th className="text-center px-4 py-3 font-medium text-muted-foreground text-xs uppercase tracking-wide">Spam Score</th>
@@ -118,7 +118,7 @@ export function BacklinkSitesClient({ sites: initial, viewerRole, currentUserId 
                   <th className="px-4 py-3 w-16" />
                 </tr>
               </thead>
-              <tbody className="divide-y">
+              <tbody className="divide-y divide-border">
                 {sites.map((site) => (
                   <tr key={site.id} className="hover:bg-muted/20 transition-colors group">
                     <td className="px-4 py-3 max-w-[280px]">
@@ -127,13 +127,13 @@ export function BacklinkSitesClient({ sites: initial, viewerRole, currentUserId 
                           href={site.url.startsWith("http") ? site.url : `https://${site.url}`}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="flex items-center gap-1 text-blue-600 hover:underline text-xs font-medium"
+                          className="flex items-center gap-1 text-primary hover:underline text-xs font-medium"
                         >
                           <span className="truncate">{site.url}</span>
                           <ExternalLink className="h-3 w-3 shrink-0" />
                         </a>
                         {site.reusable && (
-                          <span className="shrink-0 inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-blue-50 text-blue-600 border border-blue-200">
+                          <span className="shrink-0 inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-primary/10 text-primary border border-primary/20">
                             <Repeat2 className="h-2.5 w-2.5" />Reusable
                           </span>
                         )}
@@ -141,7 +141,7 @@ export function BacklinkSitesClient({ sites: initial, viewerRole, currentUserId 
                     </td>
                     <td className="px-4 py-3 text-center">
                       {site.da != null ? (
-                        <span className={`font-semibold ${site.da >= 40 ? "text-green-600" : site.da >= 20 ? "text-yellow-600" : "text-red-500"}`}>
+                        <span className={`font-semibold ${site.da >= 40 ? "text-emerald-600" : site.da >= 20 ? "text-amber-600" : "text-rose-600"}`}>
                           {site.da}
                         </span>
                       ) : (
@@ -150,7 +150,7 @@ export function BacklinkSitesClient({ sites: initial, viewerRole, currentUserId 
                     </td>
                     <td className="px-4 py-3 text-center">
                       {site.spamScore != null ? (
-                        <span className={`font-semibold ${site.spamScore <= 5 ? "text-green-600" : site.spamScore <= 15 ? "text-yellow-600" : "text-red-500"}`}>
+                        <span className={`font-semibold ${site.spamScore <= 5 ? "text-emerald-600" : site.spamScore <= 15 ? "text-amber-600" : "text-rose-600"}`}>
                           {site.spamScore}%
                         </span>
                       ) : (
@@ -169,7 +169,7 @@ export function BacklinkSitesClient({ sites: initial, viewerRole, currentUserId 
                     )}
                     <td className="px-4 py-3">
                       {canDelete(site) && (
-                        <div className="opacity-0 group-hover:opacity-100 transition-opacity flex justify-end">
+                        <div className="flex justify-end">
                           <Button
                             variant="ghost" size="sm"
                             className="h-7 w-7 p-0 text-destructive hover:text-destructive"
@@ -191,11 +191,11 @@ export function BacklinkSitesClient({ sites: initial, viewerRole, currentUserId 
       {/* Add sites sheet */}
       <Sheet open={addOpen} onOpenChange={setAddOpen}>
         <SheetContent side="right" className="w-full sm:max-w-2xl flex flex-col gap-0 p-0">
-          <SheetHeader className="px-6 py-4 border-b shrink-0">
+          <SheetHeader className="px-6 py-4 border-b border-border shrink-0">
             <SheetTitle>Import Backlink Sites</SheetTitle>
-            <p className="text-sm text-muted-foreground">
+            <SheetDescription>
               Copy 3 columns from Google Sheets (URL · DA · Spam Score) and paste below.
-            </p>
+            </SheetDescription>
           </SheetHeader>
           <div className="flex-1 overflow-y-auto">
             <AddSiteForm
@@ -215,9 +215,12 @@ export function BacklinkSitesClient({ sites: initial, viewerRole, currentUserId 
         <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <Repeat2 className="h-4 w-4 text-blue-600" />
+              <Repeat2 className="h-4 w-4 text-primary" />
               Reusable Sites
             </DialogTitle>
+            <DialogDescription>
+              Sites that stay available for new backlinks even after one has already been built on them.
+            </DialogDescription>
           </DialogHeader>
           <ReusableSitesPanel
             sites={sites}
@@ -231,10 +234,12 @@ export function BacklinkSitesClient({ sites: initial, viewerRole, currentUserId 
       {/* Delete confirm */}
       <Dialog open={!!deleteId} onOpenChange={(o) => { if (!o) setDeleteId(null); }}>
         <DialogContent className="max-w-sm">
-          <DialogHeader><DialogTitle>Remove this site?</DialogTitle></DialogHeader>
-          <p className="text-sm text-muted-foreground">
-            This will remove the site from the approved pool. Existing backlinks using this site won&apos;t be affected.
-          </p>
+          <DialogHeader>
+            <DialogTitle>Remove this site?</DialogTitle>
+            <DialogDescription>
+              This will remove the site from the approved pool. Existing backlinks using this site won&apos;t be affected.
+            </DialogDescription>
+          </DialogHeader>
           <div className="flex gap-2 justify-end mt-2">
             <Button variant="outline" onClick={() => setDeleteId(null)} disabled={deleting}>Cancel</Button>
             <Button variant="destructive" onClick={confirmDelete} disabled={deleting}>
@@ -278,10 +283,6 @@ function ReusableSitesPanel({ sites, removingId, onRemove, onAdded }: {
 
   return (
     <div className="space-y-4">
-      <p className="text-sm text-muted-foreground">
-        These sites stay visible in the dropdown even after a backlink has already been built on them.
-      </p>
-
       {/* Add form */}
       <form onSubmit={handleAdd} className="flex gap-2">
         <Input
@@ -299,21 +300,21 @@ function ReusableSitesPanel({ sites, removingId, onRemove, onAdded }: {
 
       {/* List */}
       {reusable.length === 0 ? (
-        <div className="rounded-lg border bg-muted/20 py-10 text-center">
+        <div className="rounded-xl border border-border bg-muted/20 py-10 text-center">
           <Repeat2 className="h-7 w-7 text-muted-foreground/30 mx-auto mb-2" />
           <p className="text-sm text-muted-foreground">No reusable sites yet.</p>
           <p className="text-xs text-muted-foreground mt-0.5">Add a site URL above to get started.</p>
         </div>
       ) : (
-        <div className="rounded-lg border overflow-hidden max-h-72 overflow-y-auto">
-          <div className="divide-y">
+        <div className="rounded-xl border border-border overflow-hidden max-h-72 overflow-y-auto">
+          <div className="divide-y divide-border">
             {reusable.map((site) => (
               <div key={site.id} className="flex items-center gap-3 px-3 py-2.5 hover:bg-muted/30 group">
                 <a
                   href={site.url.startsWith("http") ? site.url : `https://${site.url}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="flex-1 flex items-center gap-1 text-sm text-blue-600 hover:underline min-w-0"
+                  className="flex-1 flex items-center gap-1 text-sm text-primary hover:underline min-w-0"
                 >
                   <span className="truncate">{site.url}</span>
                   <ExternalLink className="h-3 w-3 shrink-0" />
@@ -326,7 +327,7 @@ function ReusableSitesPanel({ sites, removingId, onRemove, onAdded }: {
                   onClick={() => onRemove(site)}
                   disabled={removingId === site.id}
                   title="Remove from reusable"
-                  className="shrink-0 text-muted-foreground hover:text-destructive transition-colors opacity-0 group-hover:opacity-100"
+                  className="shrink-0 text-muted-foreground hover:text-destructive transition-colors"
                 >
                   {removingId === site.id
                     ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -446,11 +447,11 @@ function AddSiteForm({ onSaved, onCancel }: {
               </div>
             </div>
           </div>
-          <div className="rounded-lg bg-muted/40 border px-4 py-3 text-xs text-muted-foreground space-y-1">
+          <div className="rounded-lg bg-muted/40 border border-border px-4 py-3 text-xs text-muted-foreground space-y-1">
             <p className="font-medium text-foreground">How to copy from Google Sheets:</p>
             <p>1. Select the 3 columns (URL, DA, Spam Score) — header row optional</p>
-            <p>2. Press <kbd className="px-1.5 py-0.5 rounded border bg-background font-mono">Ctrl+C</kbd></p>
-            <p>3. Click the paste zone above and press <kbd className="px-1.5 py-0.5 rounded border bg-background font-mono">Ctrl+V</kbd></p>
+            <p>2. Press <kbd className="px-1.5 py-0.5 rounded border border-border bg-background font-mono">Ctrl+C</kbd></p>
+            <p>3. Click the paste zone above and press <kbd className="px-1.5 py-0.5 rounded border border-border bg-background font-mono">Ctrl+V</kbd></p>
           </div>
         </div>
       ) : (
@@ -464,10 +465,10 @@ function AddSiteForm({ onSaved, onCancel }: {
               Paste again
             </button>
           </div>
-          <div className="rounded-lg border overflow-hidden">
+          <div className="rounded-lg border border-border overflow-hidden">
             <div className="max-h-72 overflow-y-auto">
               <table className="w-full text-xs">
-                <thead className="sticky top-0 bg-muted/60 border-b">
+                <thead className="sticky top-0 bg-muted/60 border-b border-border">
                   <tr>
                     <th className="text-left px-3 py-2 font-medium text-muted-foreground">#</th>
                     <th className="text-left px-3 py-2 font-medium text-muted-foreground">URL</th>
@@ -476,9 +477,9 @@ function AddSiteForm({ onSaved, onCancel }: {
                     <th className="w-8" />
                   </tr>
                 </thead>
-                <tbody className="divide-y">
+                <tbody className="divide-y divide-border">
                   {rows.map((row, i) => (
-                    <tr key={i} className={cn("group", !row.url.trim() && "bg-red-50 dark:bg-red-950/20")}>
+                    <tr key={i} className={cn("group", !row.url.trim() && "bg-destructive/10")}>
                       <td className="px-3 py-1.5 text-muted-foreground">{i + 1}</td>
                       <td className="px-3 py-1.5">
                         <input type="text" value={row.url} onChange={(e) => updateCell(i, "url", e.target.value)}
@@ -494,7 +495,7 @@ function AddSiteForm({ onSaved, onCancel }: {
                       </td>
                       <td className="px-2 py-1.5">
                         <button type="button" onClick={() => removeRow(i)}
-                          className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-destructive">
+                          className="text-muted-foreground hover:text-destructive transition-colors">
                           <X className="h-3.5 w-3.5" />
                         </button>
                       </td>

@@ -2,10 +2,11 @@
 
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { Play, Square, RotateCcw, Plus, Trash2, Download, ChevronDown, Search, Check, ExternalLink } from "lucide-react";
+import { Play, Square, RotateCcw, Plus, Trash2, Download, ChevronDown, Search, Check, ExternalLink, BookmarkPlus, Bookmark, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { TerminalOutput, type RunStatus, type RunProgress } from "@/components/terminal-output";
 import { cn } from "@/lib/utils";
 
@@ -39,6 +40,13 @@ interface SiteRunState {
   lines: string[];
   csvPath: string | null;
   abortController: AbortController | null;
+}
+
+interface ScriptPreset {
+  id: string;
+  name: string;
+  inputs: Record<string, string | number | boolean>;
+  createdAt: string;
 }
 
 let siteIdCounter = 1;
@@ -112,6 +120,23 @@ export function ScriptRunner({ slug }: ScriptRunnerProps) {
   const [outputFilePath, setOutputFilePath] = useState<string | null>(null);
   const [progress, setProgress] = useState<RunProgress | null>(null);
 
+  // Saved input presets ("Custom Script" reinterpretation) — standard (non-multi-site) scripts only
+  const [presets, setPresets] = useState<ScriptPreset[]>([]);
+  const [presetsOpen, setPresetsOpen] = useState(false);
+  const [saveDialogOpen, setSaveDialogOpen] = useState(false);
+  const [presetName, setPresetName] = useState("");
+  const [presetError, setPresetError] = useState("");
+  const [presetBusy, setPresetBusy] = useState(false);
+  const presetsRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function onClickOutside(e: MouseEvent) {
+      if (presetsRef.current && !presetsRef.current.contains(e.target as Node)) setPresetsOpen(false);
+    }
+    document.addEventListener("mousedown", onClickOutside);
+    return () => document.removeEventListener("mousedown", onClickOutside);
+  }, []);
+
   // Multi-site state
   const [sites, setSites] = useState<SiteEntry[]>([newSite()]);
   const [siteRuns, setSiteRuns] = useState<Map<number, SiteRunState>>(new Map());
@@ -131,6 +156,59 @@ export function ScriptRunner({ slug }: ScriptRunnerProps) {
       })
       .catch(() => {});
   }, [script.requiresServiceAccount]);
+
+  // ─── Saved input presets ("Custom Script") ─────────────────────────────────
+
+  function loadPresets() {
+    fetch(`/api/script-presets?scriptSlug=${encodeURIComponent(script.slug)}`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then((data: ScriptPreset[]) => setPresets(data))
+      .catch(() => {});
+  }
+
+  useEffect(() => {
+    if (!isMultiSite) loadPresets();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [script.slug]);
+
+  function applyPreset(preset: ScriptPreset) {
+    setFieldValues((prev) => {
+      const next = { ...prev };
+      for (const [key, value] of Object.entries(preset.inputs)) {
+        next[key] = String(value);
+      }
+      return next;
+    });
+    setPresetsOpen(false);
+  }
+
+  async function savePreset() {
+    if (!presetName.trim()) { setPresetError("Give this preset a name."); return; }
+    setPresetError(""); setPresetBusy(true);
+
+    const inputsToSave: Record<string, string> = {};
+    for (const [key, value] of Object.entries(fieldValues)) {
+      if (typeof value === "string") inputsToSave[key] = value;
+    }
+
+    const res = await fetch("/api/script-presets", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ scriptSlug: script.slug, name: presetName.trim(), inputs: inputsToSave }),
+    });
+
+    setPresetBusy(false);
+    if (!res.ok) { setPresetError((await res.json()).error ?? "Failed to save preset."); return; }
+
+    setPresetName("");
+    setSaveDialogOpen(false);
+    loadPresets();
+  }
+
+  async function deletePreset(id: string) {
+    await fetch(`/api/script-presets/${id}`, { method: "DELETE" });
+    setPresets((prev) => prev.filter((p) => p.id !== id));
+  }
 
   // ─── Site run state helpers ────────────────────────────────────────────────
 
@@ -441,8 +519,48 @@ export function ScriptRunner({ slug }: ScriptRunnerProps) {
   return (
     <div className="grid gap-6 lg:grid-cols-2">
       <div className="space-y-4">
-        <div className="rounded-lg border bg-card p-5 shadow-sm">
-          <h3 className="font-semibold mb-4">Inputs</h3>
+        <div className="rounded-xl border border-border bg-card p-5 shadow-sm">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="font-semibold">Inputs</h3>
+            <div ref={presetsRef} className="relative flex items-center gap-1.5">
+              <Button type="button" variant="outline" size="sm" className="h-8 text-xs" onClick={() => setSaveDialogOpen(true)}>
+                <BookmarkPlus className="h-3.5 w-3.5" /> Save preset
+              </Button>
+              <Button type="button" variant="outline" size="sm" className="h-8 text-xs" onClick={() => setPresetsOpen((v) => !v)}>
+                <Bookmark className="h-3.5 w-3.5" /> Presets {presets.length > 0 && `(${presets.length})`}
+                <ChevronDown className="h-3 w-3" />
+              </Button>
+              {presetsOpen && (
+                <div className="absolute right-0 top-full mt-1 w-64 rounded-lg border border-border bg-popover shadow-md z-50">
+                  {presets.length === 0 ? (
+                    <p className="px-3 py-3 text-xs text-muted-foreground">No saved presets yet for this script.</p>
+                  ) : (
+                    <ul className="max-h-56 overflow-y-auto py-1">
+                      {presets.map((p) => (
+                        <li key={p.id} className="flex items-center gap-1 px-1">
+                          <button
+                            type="button"
+                            onClick={() => applyPreset(p)}
+                            className="flex-1 text-left px-2 py-1.5 text-sm rounded hover:bg-accent truncate"
+                          >
+                            {p.name}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => deletePreset(p.id)}
+                            aria-label={`Delete preset ${p.name}`}
+                            className="p-1.5 text-muted-foreground hover:text-destructive shrink-0"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
           <form onSubmit={handleStandardSubmit} className="space-y-4">
             {script.requiresServiceAccount && (
               <div className="space-y-1.5">
@@ -513,7 +631,7 @@ export function ScriptRunner({ slug }: ScriptRunnerProps) {
               <a
                 href={`/api/logs/download?path=${encodeURIComponent(outputFilePath)}`}
                 download
-                className="flex items-center justify-center gap-2 w-full h-9 rounded-md bg-green-600 hover:bg-green-700 text-white text-sm font-medium transition-colors"
+                className="flex items-center justify-center gap-2 w-full h-9 rounded-lg bg-green-600 hover:bg-green-700 text-white text-sm font-medium transition-colors"
               >
                 <Download className="h-4 w-4" />
                 Download {outputFilePath.endsWith(".txt") ? "TXT" : "CSV"}
@@ -524,7 +642,7 @@ export function ScriptRunner({ slug }: ScriptRunnerProps) {
                 href={script.sheetUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="flex items-center justify-center gap-2 w-full h-9 rounded-md bg-emerald-500 hover:bg-emerald-600 text-white text-sm font-medium transition-colors shadow-sm shadow-emerald-500/25"
+                className="flex items-center justify-center gap-2 w-full h-9 rounded-lg bg-emerald-500 hover:bg-emerald-600 text-white text-sm font-medium transition-colors shadow-sm shadow-emerald-500/25"
               >
                 <ExternalLink className="h-4 w-4" />
                 Open Google Sheet
@@ -536,6 +654,35 @@ export function ScriptRunner({ slug }: ScriptRunnerProps) {
       <div>
         <TerminalOutput lines={lines} status={status} progress={progress} />
       </div>
+
+      {/* Save preset dialog */}
+      <Dialog open={saveDialogOpen} onOpenChange={(o) => { setSaveDialogOpen(o); if (!o) { setPresetName(""); setPresetError(""); } }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Save as preset</DialogTitle>
+            <DialogDescription>Save the current input values so you can reuse them next time — file uploads aren&apos;t saved.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <Label>Preset name</Label>
+              <Input
+                placeholder="e.g. Weekly blog batch"
+                value={presetName}
+                onChange={(e) => setPresetName(e.target.value)}
+                autoFocus
+              />
+            </div>
+            {presetError && <p className="text-sm text-destructive">{presetError}</p>}
+            <div className="flex gap-2 justify-end pt-1">
+              <Button type="button" variant="outline" onClick={() => setSaveDialogOpen(false)} disabled={presetBusy}>Cancel</Button>
+              <Button type="button" onClick={savePreset} disabled={presetBusy}>
+                {presetBusy && <Loader2 className="h-4 w-4 animate-spin" />}
+                Save
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -573,7 +720,7 @@ function SiteCard({
     urlCount > 0;
 
   return (
-    <div className="rounded-lg border bg-card shadow-sm overflow-hidden">
+    <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
       {/* Card header */}
       <div className="flex items-center gap-3 px-4 py-3 border-b bg-muted/30">
         <span className="text-sm font-semibold text-muted-foreground w-6 shrink-0">
@@ -627,7 +774,7 @@ function SiteCard({
           <div className="space-y-1">
             <Label className="text-xs">URLs <span className="text-destructive">*</span></Label>
             <textarea
-              className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-xs font-mono ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 resize-none"
+              className="flex w-full rounded-lg border border-input bg-background px-3 py-2 text-xs font-mono ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 resize-none"
               rows={6}
               placeholder={"https://example.com/page-1\nhttps://example.com/page-2\n..."}
               value={site.urls}
@@ -658,7 +805,7 @@ function SiteCard({
               <a
                 href={`/api/logs/download?path=${encodeURIComponent(run.csvPath)}`}
                 download
-                className="inline-flex items-center gap-1.5 h-9 px-3 rounded-md bg-green-600 hover:bg-green-700 text-white text-xs font-medium transition-colors"
+                className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg bg-green-600 hover:bg-green-700 text-white text-xs font-medium transition-colors"
               >
                 <Download className="h-3.5 w-3.5" />
                 Download CSV
@@ -672,7 +819,7 @@ function SiteCard({
           {indexerSummary && (
             <div
               className={cn(
-                "mb-3 rounded-md border p-3 text-sm",
+                "mb-3 rounded-lg border p-3 text-sm",
                 indexerSummary.fatalMessage
                   ? "border-destructive/30 bg-destructive/10 text-destructive"
                   : "border-border bg-muted/30"
@@ -766,7 +913,7 @@ function SingleAccountSelector({
       <button
         ref={buttonRef}
         type="button"
-        className={`${isSmall ? "h-8 text-xs" : "h-10 text-sm"} w-full flex items-center justify-between rounded-md border border-input bg-background px-3 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring`}
+        className={`${isSmall ? "h-8 text-xs" : "h-10 text-sm"} w-full flex items-center justify-between rounded-lg border border-input bg-background px-3 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring`}
         onClick={handleOpen}
         disabled={disabled}
       >
@@ -786,7 +933,7 @@ function SingleAccountSelector({
             width: anchorRect.width,
             zIndex: 9999,
           }}
-          className="rounded-md border bg-popover shadow-md"
+          className="rounded-lg border bg-popover shadow-md"
         >
           <div className="flex items-center gap-2 px-3 py-2 border-b">
             <Search className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
@@ -877,7 +1024,7 @@ function MultiAccountSelector({ accountNames, selected, onChange, disabled }: Mu
     <div ref={containerRef} className="relative">
       <button
         type="button"
-        className="h-10 w-full flex items-center justify-between rounded-md border border-input bg-background px-3 text-sm disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className="h-10 w-full flex items-center justify-between rounded-lg border border-input bg-background px-3 text-sm disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         onClick={() => setOpen((o) => !o)}
         disabled={disabled}
       >
@@ -886,7 +1033,7 @@ function MultiAccountSelector({ accountNames, selected, onChange, disabled }: Mu
       </button>
 
       {open && (
-        <div className="absolute z-50 mt-1 w-full rounded-md border bg-popover shadow-md">
+        <div className="absolute z-50 mt-1 w-full rounded-lg border bg-popover shadow-md">
           {/* Search */}
           <div className="flex items-center gap-2 px-3 py-2 border-b">
             <Search className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
@@ -961,7 +1108,7 @@ function ScriptField({ input, value, onChange, disabled }: ScriptFieldProps) {
       {input.type === "textarea" ? (
         <textarea
           id={input.name}
-          className="flex min-h-[100px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 font-mono resize-y"
+          className="flex min-h-[100px] w-full rounded-lg border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 font-mono resize-y"
           placeholder={input.placeholder}
           value={typeof value === "string" ? value : ""}
           onChange={(e) => onChange(e.target.value)}
@@ -982,7 +1129,7 @@ function ScriptField({ input, value, onChange, disabled }: ScriptFieldProps) {
             )}
             disabled={disabled}
             required={input.required}
-            className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+            className="flex w-full rounded-lg border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
           />
           {input.folder && value instanceof FileList && value.length > 0 && (
             <p className="text-xs text-muted-foreground">

@@ -12,7 +12,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle,
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 
@@ -56,17 +56,17 @@ const STATUS_OPTIONS: { value: TaskStatus; label: string }[] = [
 
 function StatusBadge({ status }: { status: TaskStatus }) {
   if (status === "done") return (
-    <Badge className="gap-1 bg-green-500/15 text-green-700 border-green-400/30 hover:bg-green-500/15">
+    <Badge className="gap-1 bg-emerald-500/15 text-emerald-700 border-emerald-500/30 hover:bg-emerald-500/15">
       <CheckCircle className="h-3 w-3" /> Done
     </Badge>
   );
   if (status === "in-progress") return (
-    <Badge className="gap-1 bg-blue-500/15 text-blue-700 border-blue-400/30 hover:bg-blue-500/15">
+    <Badge className="gap-1 bg-primary/15 text-primary border-primary/30 hover:bg-primary/15">
       <Clock className="h-3 w-3" /> In Progress
     </Badge>
   );
   return (
-    <Badge className="gap-1 bg-yellow-500/15 text-yellow-700 border-yellow-400/30 hover:bg-yellow-500/15">
+    <Badge className="gap-1 bg-amber-500/15 text-amber-700 border-amber-500/30 hover:bg-amber-500/15">
       <AlertCircle className="h-3 w-3" /> Pending
     </Badge>
   );
@@ -167,7 +167,7 @@ export function ContentClient({
             <select
               value={filterMember}
               onChange={(e) => setFilterMember(e.target.value)}
-              className="h-9 rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className="h-9 rounded-lg border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
               <option value="">All members</option>
               {members.map((m) => (
@@ -181,7 +181,7 @@ export function ContentClient({
           <select
             value={filterStatus}
             onChange={(e) => setFilterStatus(e.target.value)}
-            className="h-9 rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="h-9 rounded-lg border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             <option value="">All statuses</option>
             <option value="pending">Pending</option>
@@ -192,12 +192,12 @@ export function ContentClient({
         <div className="space-y-1">
           <Label className="text-xs text-muted-foreground">From</Label>
           <input type="date" value={filterFrom} onChange={(e) => setFilterFrom(e.target.value)}
-            className="h-9 rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" />
+            className="h-9 rounded-lg border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" />
         </div>
         <div className="space-y-1">
           <Label className="text-xs text-muted-foreground">To</Label>
           <input type="date" value={filterTo} onChange={(e) => setFilterTo(e.target.value)}
-            className="h-9 rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" />
+            className="h-9 rounded-lg border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" />
         </div>
         {isFiltering && (
           <Button size="sm" variant="outline"
@@ -211,11 +211,11 @@ export function ContentClient({
       {filtered.length > 0 && (
         <div className="grid grid-cols-3 gap-3">
           {[
-            { label: "Pending",     count: pending,    color: "text-yellow-700 bg-yellow-50 border-yellow-200" },
-            { label: "In Progress", count: inProgress, color: "text-blue-700 bg-blue-50 border-blue-200" },
-            { label: "Done",        count: done,       color: "text-green-700 bg-green-50 border-green-200" },
+            { label: "Pending",     count: pending,    color: "text-amber-700 bg-amber-500/10 border-amber-500/20" },
+            { label: "In Progress", count: inProgress, color: "text-primary bg-primary/10 border-primary/20" },
+            { label: "Done",        count: done,       color: "text-emerald-700 bg-emerald-500/10 border-emerald-500/20" },
           ].map((s) => (
-            <div key={s.label} className={cn("rounded-lg border p-3 text-center", s.color)}>
+            <div key={s.label} className={cn("rounded-xl border p-3 text-center", s.color)}>
               <p className="text-2xl font-bold">{s.count}</p>
               <p className="text-xs font-medium mt-0.5">{s.label}</p>
             </div>
@@ -238,6 +238,7 @@ export function ContentClient({
         <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Add Record — {pageTitle}</DialogTitle>
+            <DialogDescription>Fill in the details below to create a new record.</DialogDescription>
           </DialogHeader>
           <TaskForm
             taskType={taskType}
@@ -252,6 +253,7 @@ export function ContentClient({
         <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Edit Record</DialogTitle>
+            <DialogDescription>Update this record&apos;s details.</DialogDescription>
           </DialogHeader>
           {editItem && (
             <TaskForm
@@ -270,8 +272,8 @@ export function ContentClient({
         <DialogContent className="max-w-sm">
           <DialogHeader>
             <DialogTitle>Delete this record?</DialogTitle>
+            <DialogDescription>This action cannot be undone.</DialogDescription>
           </DialogHeader>
-          <p className="text-sm text-muted-foreground">This action cannot be undone.</p>
           <div className="flex gap-2 justify-end mt-2">
             <Button variant="outline" onClick={() => setDeleteId(null)}>Cancel</Button>
             <Button variant="destructive" onClick={confirmDelete} disabled={deleting}>
@@ -299,18 +301,18 @@ function TaskTable({
 }) {
   if (rows.length === 0) {
     return (
-      <div className="rounded-lg border bg-card p-12 text-center">
+      <div className="rounded-xl border border-border bg-card p-12 text-center">
         <p className="text-muted-foreground text-sm">No records yet. Click &quot;Add Record&quot; to get started.</p>
       </div>
     );
   }
 
   return (
-    <div className="rounded-lg border bg-card shadow-sm overflow-hidden">
+    <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
-            <tr className="border-b bg-muted/50">
+            <tr className="border-b border-border bg-muted/50">
               {viewerRole !== "admin" && (
                 <th className="text-left px-4 py-3 font-medium text-muted-foreground text-xs uppercase tracking-wide">Member</th>
               )}
@@ -321,7 +323,7 @@ function TaskTable({
               <th className="px-4 py-3" />
             </tr>
           </thead>
-          <tbody className="divide-y">
+          <tbody className="divide-y divide-border">
             {rows.map((row) => (
               <TaskRow
                 key={row.id}
@@ -550,7 +552,7 @@ function TaskForm({
         <div className="space-y-1.5">
           <Label>Status</Label>
           <select
-            className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             value={status}
             onChange={(e) => setStatus(e.target.value as TaskStatus)}
           >

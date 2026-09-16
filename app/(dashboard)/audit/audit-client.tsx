@@ -3,14 +3,15 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import {
-  Plus, Pencil, Trash2, Loader2, Eye, ExternalLink,
+  Plus, Pencil, Trash2, Loader2, ExternalLink,
   ChevronUp, ChevronDown, ClipboardList, Globe,
+  CheckCircle2, XCircle, Clock,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -38,6 +39,16 @@ export interface AuditRecordRow {
   date: string;
   results: AuditResult[];
   createdAt: string;
+}
+
+export interface AuditReviewRow {
+  id: string;
+  auditRecordId: string;
+  reviewerUserId: string;
+  reviewerName: string;
+  status: "approved" | "rejected";
+  rejectionReason: string;
+  reviewedAt: string;
 }
 
 const PKT = "Asia/Karachi";
@@ -78,7 +89,7 @@ export function AuditClient({
   useEffect(() => { setPoints(initialPoints); }, [initialPoints]);
 
   const [newAuditOpen, setNewAuditOpen] = useState(false);
-  const [viewRecord, setViewRecord] = useState<AuditRecordRow | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [checklistOpen, setChecklistOpen] = useState(false);
@@ -88,7 +99,34 @@ export function AuditClient({
   const [filterTo, setFilterTo] = useState("");
 
   const isSuperAdmin = viewerRole === "super-admin";
+  const isSupervisor = viewerRole === "sub-lead";
+  const canReviewRole = isSuperAdmin || isSupervisor;
   const canSeeMembers = viewerRole !== "admin";
+
+  // QA review workflow (Part C addition) — fetched once, joined client-side
+  // by auditRecordId. The existing AuditRecord model/routes are untouched.
+  const [reviews, setReviews] = useState<AuditReviewRow[]>([]);
+  useEffect(() => {
+    fetch("/api/audit-reviews")
+      .then((res) => (res.ok ? res.json() : []))
+      .then(setReviews)
+      .catch(() => setReviews([]));
+  }, []);
+  const reviewMap = new Map(reviews.map((r) => [r.auditRecordId, r]));
+
+  async function reviewRecord(recordId: string, action: "approve" | "reject", rejectionReason?: string) {
+    const res = await fetch("/api/audit-reviews", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ auditRecordId: recordId, action, rejectionReason }),
+    });
+    if (res.ok) {
+      const review = await res.json();
+      setReviews((prev) => [...prev.filter((r) => r.auditRecordId !== recordId), review]);
+    } else {
+      alert((await res.json()).error ?? "Failed to submit review.");
+    }
+  }
 
   const filtered = records.filter((r) => {
     if (filterMember && r.submittedBy !== filterMember) return false;
@@ -97,6 +135,8 @@ export function AuditClient({
     return true;
   });
 
+  const selectedRecord = filtered.find((r) => r.id === selectedId) ?? filtered[0] ?? null;
+
   async function confirmDelete() {
     if (!deleteId) return;
     setDeleting(true);
@@ -104,6 +144,7 @@ export function AuditClient({
     setDeleting(false);
     if (res.ok) {
       setRecords((prev) => prev.filter((r) => r.id !== deleteId));
+      if (selectedId === deleteId) setSelectedId(null);
       setDeleteId(null);
       router.refresh();
     }
@@ -136,7 +177,7 @@ export function AuditClient({
 
       {/* ── No checklist warning ── */}
       {points.length === 0 && (
-        <div className="rounded-lg border border-yellow-200 bg-yellow-50 px-4 py-3 text-sm text-yellow-800">
+        <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-700 dark:text-amber-400">
           {isSuperAdmin
             ? "No checklist points yet. Click \"Manage Checklist\" to add points before submitting audits."
             : "No checklist points have been configured yet. Contact your admin."}
@@ -152,7 +193,7 @@ export function AuditClient({
               <select
                 value={filterMember}
                 onChange={(e) => setFilterMember(e.target.value)}
-                className="h-9 rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className="h-9 rounded-lg border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 <option value="">All members</option>
                 {members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
@@ -162,12 +203,12 @@ export function AuditClient({
           <div className="space-y-1">
             <Label className="text-xs text-muted-foreground">From</Label>
             <input type="date" value={filterFrom} onChange={(e) => setFilterFrom(e.target.value)}
-              className="h-9 rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" />
+              className="h-9 rounded-lg border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" />
           </div>
           <div className="space-y-1">
             <Label className="text-xs text-muted-foreground">To</Label>
             <input type="date" value={filterTo} onChange={(e) => setFilterTo(e.target.value)}
-              className="h-9 rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" />
+              className="h-9 rounded-lg border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" />
           </div>
           {(filterMember || filterFrom || filterTo) && (
             <Button size="sm" variant="outline"
@@ -178,9 +219,9 @@ export function AuditClient({
         </div>
       )}
 
-      {/* ── Records list ── */}
+      {/* ── Master-detail: list on the left, scored detail panel on the right ── */}
       {filtered.length === 0 ? (
-        <div className="rounded-lg border bg-card p-12 text-center">
+        <div className="rounded-xl border bg-card p-12 text-center">
           <p className="text-sm text-muted-foreground">
             {records.length === 0
               ? "No audits yet. Click \"New Audit\" to get started."
@@ -188,51 +229,75 @@ export function AuditClient({
           </p>
         </div>
       ) : (
-        <div className="space-y-3">
-          {filtered.map((r) => {
-            const checkedCount = r.results.filter((res) => res.checked).length;
-            const totalCount = r.results.length;
-            const canDelete = isSuperAdmin || r.submittedBy === currentUserId;
-            return (
-              <div key={r.id} className="rounded-lg border bg-card shadow-sm p-4">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex items-start gap-3">
+        <div className="grid grid-cols-1 lg:grid-cols-[360px_1fr] gap-4 items-start">
+          {/* List */}
+          <div className="space-y-2">
+            {filtered.map((r) => {
+              const checkedCount = r.results.filter((res) => res.checked).length;
+              const totalCount = r.results.length;
+              const pct = totalCount > 0 ? Math.round((checkedCount / totalCount) * 100) : 0;
+              const review = reviewMap.get(r.id);
+              const isSelected = selectedRecord?.id === r.id;
+              return (
+                <button
+                  key={r.id}
+                  onClick={() => setSelectedId(r.id)}
+                  className={cn(
+                    "w-full text-left rounded-xl border p-3 transition-colors",
+                    isSelected ? "border-primary bg-primary/5 shadow-sm" : "bg-card hover:bg-muted/30"
+                  )}
+                >
+                  <div className="flex items-start gap-2.5">
                     {canSeeMembers && (
-                      <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10 text-xs font-bold shrink-0 mt-0.5">
+                      <div className="flex h-7 w-7 items-center justify-center rounded-full bg-primary/10 text-[11px] font-bold shrink-0 mt-0.5">
                         {initials(r.submittedByName)}
                       </div>
                     )}
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <p className="font-semibold text-sm">{r.websiteName}</p>
-                        <a href={r.websiteUrl} target="_blank" rel="noopener noreferrer"
-                          className="text-blue-500 hover:text-blue-700">
-                          <ExternalLink className="h-3.5 w-3.5" />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-1.5">
+                        <p className="font-semibold text-sm truncate">{r.websiteName}</p>
+                        <a
+                          href={r.websiteUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onClick={(e) => e.stopPropagation()}
+                          className="text-primary/80 hover:text-primary shrink-0"
+                        >
+                          <ExternalLink className="h-3 w-3" />
                         </a>
                       </div>
                       {canSeeMembers && (
-                        <p className="text-xs text-muted-foreground">{r.submittedByName}</p>
+                        <p className="text-xs text-muted-foreground truncate">{r.submittedByName}</p>
                       )}
-                      <p className="text-xs text-muted-foreground mt-0.5">{formatDate(r.date)}</p>
+                      <div className="flex items-center gap-1.5 mt-1">
+                        <p className="text-xs text-muted-foreground">{formatDate(r.date)}</p>
+                        <span className="text-xs font-medium text-muted-foreground">· {pct}%</span>
+                        {review && <ReviewStatusPill status={review.status} compact />}
+                      </div>
                     </div>
                   </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    <span className="text-xs text-muted-foreground bg-muted px-2 py-1 rounded-full whitespace-nowrap">
-                      {checkedCount}/{totalCount} checked
-                    </span>
-                    <Button variant="ghost" size="sm" onClick={() => setViewRecord(r)}>
-                      <Eye className="h-3.5 w-3.5" />
-                    </Button>
-                    {canDelete && (
-                      <Button variant="ghost" size="sm" onClick={() => setDeleteId(r.id)}>
-                        <Trash2 className="h-3.5 w-3.5 text-muted-foreground" />
-                      </Button>
-                    )}
-                  </div>
-                </div>
-              </div>
-            );
-          })}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Detail panel — shown first on mobile (order-first) so selecting/viewing
+              an audit doesn't require scrolling past the whole list; desktop keeps
+              its natural grid-column position via lg:order-none. */}
+          <div className="order-first lg:order-none rounded-xl border bg-card shadow-sm p-5">
+            {selectedRecord ? (
+              <AuditDetailPanel
+                record={selectedRecord}
+                canDelete={isSuperAdmin || selectedRecord.submittedBy === currentUserId}
+                onDelete={() => setDeleteId(selectedRecord.id)}
+                review={reviewMap.get(selectedRecord.id) ?? null}
+                canReviewRole={canReviewRole}
+                onReview={(action, reason) => reviewRecord(selectedRecord.id, action, reason)}
+              />
+            ) : (
+              <p className="text-sm text-muted-foreground">Select an audit to view its details.</p>
+            )}
+          </div>
         </div>
       )}
 
@@ -241,6 +306,7 @@ export function AuditClient({
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>New Website Audit</DialogTitle>
+            <DialogDescription>Walk through the checklist and record your findings.</DialogDescription>
           </DialogHeader>
           <NewAuditForm
             key={newAuditOpen ? "open" : "closed"}
@@ -255,21 +321,13 @@ export function AuditClient({
         </DialogContent>
       </Dialog>
 
-      {/* ── View Audit Dialog ── */}
-      <Dialog open={!!viewRecord} onOpenChange={(o) => { if (!o) setViewRecord(null); }}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>Audit Details</DialogTitle>
-          </DialogHeader>
-          {viewRecord && <ViewAudit record={viewRecord} />}
-        </DialogContent>
-      </Dialog>
-
       {/* ── Delete Confirm ── */}
       <Dialog open={!!deleteId} onOpenChange={(o) => { if (!o) setDeleteId(null); }}>
         <DialogContent className="max-w-sm">
-          <DialogHeader><DialogTitle>Delete this audit?</DialogTitle></DialogHeader>
-          <p className="text-sm text-muted-foreground">This action cannot be undone.</p>
+          <DialogHeader>
+            <DialogTitle>Delete this audit?</DialogTitle>
+            <DialogDescription>This action cannot be undone.</DialogDescription>
+          </DialogHeader>
           <div className="flex gap-2 justify-end mt-2">
             <Button variant="outline" onClick={() => setDeleteId(null)}>Cancel</Button>
             <Button variant="destructive" onClick={confirmDelete} disabled={deleting}>
@@ -285,6 +343,7 @@ export function AuditClient({
           <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>Manage Checklist</DialogTitle>
+              <DialogDescription>Add, edit, reorder, or remove audit checklist points.</DialogDescription>
             </DialogHeader>
             <ChecklistManager points={points} onPointsChange={setPoints} />
           </DialogContent>
@@ -372,7 +431,7 @@ function NewAuditForm({
           value={date}
           onChange={(e) => setDate(e.target.value)}
           required
-          className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         />
       </div>
 
@@ -386,7 +445,7 @@ function NewAuditForm({
             <div
               key={result.pointId}
               className={cn(
-                "rounded-lg border p-4 space-y-3 transition-colors",
+                "rounded-xl border p-4 space-y-3 transition-colors",
                 result.checked ? "border-primary/30 bg-primary/5" : "bg-card"
               )}
             >
@@ -395,7 +454,7 @@ function NewAuditForm({
                   type="checkbox"
                   checked={result.checked}
                   onChange={() => toggleCheck(idx)}
-                  className="mt-0.5 h-4 w-4 rounded border-gray-300 accent-primary cursor-pointer shrink-0"
+                  className="mt-0.5 h-4 w-4 rounded border-input accent-primary cursor-pointer shrink-0"
                 />
                 <div>
                   <p className="text-sm font-semibold leading-tight">{point.heading}</p>
@@ -432,46 +491,142 @@ function NewAuditForm({
   );
 }
 
-// ─── View Audit ───────────────────────────────────────────────────────────────
+// ─── Review status pill (Part C addition) ─────────────────────────────────────
 
-function ViewAudit({ record }: { record: AuditRecordRow }) {
+function ReviewStatusPill({ status, compact }: { status: "approved" | "rejected"; compact?: boolean }) {
+  const isApproved = status === "approved";
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-1 rounded-full border font-medium",
+        compact ? "text-[10px] px-1.5 py-0" : "text-xs px-2 py-0.5",
+        isApproved
+          ? "border-emerald-400/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+          : "border-rose-400/30 bg-rose-500/10 text-rose-700 dark:text-rose-400"
+      )}
+    >
+      {isApproved ? <CheckCircle2 className="h-3 w-3" /> : <XCircle className="h-3 w-3" />}
+      {isApproved ? "Approved" : "Rejected"}
+    </span>
+  );
+}
+
+// ─── Audit Detail Panel (Part C addition — master-detail + score + QA review) ──
+
+function AuditDetailPanel({
+  record, canDelete, onDelete, review, canReviewRole, onReview,
+}: {
+  record: AuditRecordRow;
+  canDelete: boolean;
+  onDelete: () => void;
+  review: AuditReviewRow | null;
+  canReviewRole: boolean;
+  onReview: (action: "approve" | "reject", rejectionReason?: string) => void;
+}) {
+  const [rejectOpen, setRejectOpen] = useState(false);
+  const [rejectReason, setRejectReason] = useState("");
+
   const checkedResults = record.results.filter((r) => r.checked);
   const uncheckedResults = record.results.filter((r) => !r.checked);
+  const total = record.results.length;
+  const pct = total > 0 ? Math.round((checkedResults.length / total) * 100) : 0;
+
+  function submitReject() {
+    onReview("reject", rejectReason.trim());
+    setRejectOpen(false);
+    setRejectReason("");
+  }
 
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-2 gap-3 text-sm">
-        <div>
-          <p className="text-xs text-muted-foreground">Website</p>
-          <p className="font-medium">{record.websiteName}</p>
+      <div className="flex items-start justify-between gap-3">
+        <div className="grid grid-cols-2 gap-3 text-sm flex-1">
+          <div>
+            <p className="text-xs text-muted-foreground">Website</p>
+            <p className="font-medium">{record.websiteName}</p>
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground">URL</p>
+            <a href={record.websiteUrl} target="_blank" rel="noopener noreferrer"
+              className="font-medium text-primary hover:underline flex items-center gap-1 break-all">
+              <Globe className="h-3.5 w-3.5 shrink-0" />
+              {record.websiteUrl}
+            </a>
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground">Date</p>
+            <p className="font-medium">{formatDate(record.date)}</p>
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground">Submitted By</p>
+            <p className="font-medium">{record.submittedByName}</p>
+          </div>
         </div>
-        <div>
-          <p className="text-xs text-muted-foreground">URL</p>
-          <a href={record.websiteUrl} target="_blank" rel="noopener noreferrer"
-            className="font-medium text-blue-600 hover:underline flex items-center gap-1 break-all">
-            <Globe className="h-3.5 w-3.5 shrink-0" />
-            {record.websiteUrl}
-          </a>
-        </div>
-        <div>
-          <p className="text-xs text-muted-foreground">Date</p>
-          <p className="font-medium">{formatDate(record.date)}</p>
-        </div>
-        <div>
-          <p className="text-xs text-muted-foreground">Submitted By</p>
-          <p className="font-medium">{record.submittedByName}</p>
-        </div>
+        {canDelete && (
+          <Button variant="ghost" size="sm" onClick={onDelete} className="shrink-0">
+            <Trash2 className="h-3.5 w-3.5 text-muted-foreground" />
+          </Button>
+        )}
       </div>
+
+      {/* Compliance score + progress bar */}
+      <div className="rounded-xl border bg-muted/30 p-4 space-y-2">
+        <div className="flex items-center justify-between">
+          <p className="text-sm font-medium">Compliance Score</p>
+          <p className="text-2xl font-bold">{pct}%</p>
+        </div>
+        <div className="h-2 rounded-full bg-muted overflow-hidden">
+          <div
+            className={cn("h-full rounded-full transition-all", pct >= 80 ? "bg-emerald-500" : pct >= 50 ? "bg-amber-500" : "bg-rose-500")}
+            style={{ width: `${pct}%` }}
+          />
+        </div>
+        <p className="text-xs text-muted-foreground">{checkedResults.length}/{total} checklist points passed</p>
+      </div>
+
+      {/* QA review (Part C addition) */}
+      {(review || canReviewRole) && (
+        <div className="rounded-xl border p-4 space-y-2">
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <p className="text-sm font-medium">QA Review</p>
+            {review ? (
+              <div className="flex items-center gap-2">
+                <ReviewStatusPill status={review.status} />
+                <span className="text-xs text-muted-foreground">by {review.reviewerName}</span>
+              </div>
+            ) : (
+              <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+                <Clock className="h-3 w-3" /> Pending review
+              </span>
+            )}
+          </div>
+          {review?.status === "rejected" && review.rejectionReason && (
+            <p className="text-xs text-rose-600 dark:text-rose-400">Reason: {review.rejectionReason}</p>
+          )}
+          {canReviewRole && (
+            <div className="flex gap-2 pt-1">
+              <Button size="sm" variant="outline" className="border-emerald-500/40 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-500/10"
+                onClick={() => onReview("approve")}>
+                <CheckCircle2 className="h-3.5 w-3.5" /> Approve
+              </Button>
+              <Button size="sm" variant="outline" className="border-rose-500/40 text-rose-700 dark:text-rose-400 hover:bg-rose-500/10"
+                onClick={() => setRejectOpen(true)}>
+                <XCircle className="h-3.5 w-3.5" /> Reject
+              </Button>
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="border-t pt-4 space-y-3">
         <p className="text-sm font-medium text-muted-foreground">
-          {checkedResults.length}/{record.results.length} points checked
+          {checkedResults.length}/{total} points checked
         </p>
 
         {checkedResults.map((r) => (
-          <div key={r.pointId} className="rounded-lg border border-green-200 bg-green-50 p-3 space-y-1.5">
+          <div key={r.pointId} className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 space-y-1.5">
             <div className="flex items-center gap-2">
-              <span className="text-green-600 font-bold text-sm">✓</span>
+              <span className="text-emerald-700 dark:text-emerald-400 font-bold text-sm">✓</span>
               <p className="text-sm font-medium">{r.heading}</p>
             </div>
             {r.details && (
@@ -481,7 +636,7 @@ function ViewAudit({ record }: { record: AuditRecordRow }) {
         ))}
 
         {uncheckedResults.map((r) => (
-          <div key={r.pointId} className="rounded-lg border bg-muted/30 p-3">
+          <div key={r.pointId} className="rounded-xl border bg-muted/30 p-3">
             <div className="flex items-center gap-2">
               <span className="text-muted-foreground text-sm">○</span>
               <p className="text-sm text-muted-foreground">{r.heading}</p>
@@ -489,6 +644,26 @@ function ViewAudit({ record }: { record: AuditRecordRow }) {
           </div>
         ))}
       </div>
+
+      {/* Reject reason dialog */}
+      <Dialog open={rejectOpen} onOpenChange={setRejectOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Reject this audit?</DialogTitle>
+            <DialogDescription>Let the submitter know what needs fixing.</DialogDescription>
+          </DialogHeader>
+          <Textarea
+            placeholder="e.g. Missing details on 2 checklist points, please redo."
+            value={rejectReason}
+            onChange={(e) => setRejectReason(e.target.value)}
+            className="min-h-[100px] text-sm"
+          />
+          <div className="flex gap-2 justify-end pt-1">
+            <Button variant="outline" onClick={() => setRejectOpen(false)}>Cancel</Button>
+            <Button variant="destructive" onClick={submitReject}>Reject</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -578,7 +753,7 @@ function ChecklistManager({
             saving={saving}
           />
         ) : (
-          <div key={point.id} className="rounded-lg border bg-card p-4 flex items-start gap-3">
+          <div key={point.id} className="rounded-xl border bg-card p-4 flex items-start gap-3">
             <div className="flex flex-col gap-1 shrink-0 mt-0.5">
               <button
                 onClick={() => movePoint(idx, -1)}
@@ -645,7 +820,7 @@ function PointForm({
   const [description, setDescription] = useState(initial?.description ?? "");
 
   return (
-    <div className="rounded-lg border bg-muted/30 p-4 space-y-3">
+    <div className="rounded-xl border bg-muted/30 p-4 space-y-3">
       <div className="space-y-1.5">
         <Label>Heading <span className="text-destructive">*</span></Label>
         <Input

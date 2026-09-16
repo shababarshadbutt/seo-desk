@@ -1,5 +1,5 @@
 import { scripts } from "@/lib/scripts-config";
-import { ScriptCard } from "@/components/script-card";
+import { ScriptsListClient } from "@/components/scripts-list-client";
 
 export default function ScriptsPage() {
   return (
@@ -11,11 +11,7 @@ export default function ScriptsPage() {
         </p>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-        {scripts.map((script) => (
-          <ScriptCard key={script.slug} script={script} />
-        ))}
-      </div>
+      <ScriptsListClient />
     </div>
   );
 }

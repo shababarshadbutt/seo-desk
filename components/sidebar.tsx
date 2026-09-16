@@ -23,8 +23,10 @@ import {
   ListChecks,
   Clock,
   Filter,
+  Menu,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Sheet, SheetContent, SheetTrigger, SheetTitle, SheetDescription } from "@/components/ui/sheet";
 import packageJson from "@/package.json";
 
 // ─── Nav config ───────────────────────────────────────────────────────────────
@@ -109,6 +111,7 @@ export function Sidebar() {
   const { data: session } = useSession();
   const role = session?.user?.role;
   const myRank = roleRank(role);
+  const [mobileOpen, setMobileOpen] = useState(false);
 
   const activeType = searchParams.get("type") ?? "";
 
@@ -152,13 +155,13 @@ export function Sidebar() {
 
   const visible = navItems.filter((item) => myRank >= minRoleRank(item.minRole));
 
-  return (
-    <aside className="flex h-screen w-64 flex-col bg-gray-900 text-gray-100">
+  const navContent = (
+    <>
       {/* Brand */}
-      <div className="flex flex-col items-center gap-1 px-6 py-5 border-b border-gray-700">
+      <div className="flex flex-col items-center gap-1 px-6 py-5 border-b border-slate-800">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src="/dashboard-logo.png" alt="ASAP" className="h-14 w-auto object-contain" />
-        <span className="text-[10px] font-medium tracking-wide text-gray-500">
+        <span className="text-[10px] font-medium tracking-wide text-slate-500">
           v{packageJson.version}
         </span>
       </div>
@@ -173,11 +176,12 @@ export function Sidebar() {
               <Link
                 key={item.href}
                 href={item.href}
+                onClick={() => setMobileOpen(false)}
                 className={cn(
-                  "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                  "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
                   isActive
-                    ? "bg-blue-600 text-white"
-                    : "text-gray-400 hover:bg-gray-800 hover:text-gray-100"
+                    ? "bg-primary text-primary-foreground"
+                    : "text-slate-400 hover:bg-slate-800/60 hover:text-slate-100"
                 )}
               >
                 <Icon className="h-4 w-4 shrink-0" />
@@ -200,10 +204,10 @@ export function Sidebar() {
               <button
                 onClick={() => toggleGroup(item.label)}
                 className={cn(
-                  "w-full flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                  "w-full flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
                   isAnyChildActive
-                    ? "text-blue-400 bg-gray-800"
-                    : "text-gray-400 hover:bg-gray-800 hover:text-gray-100"
+                    ? "text-blue-400 bg-slate-800/60"
+                    : "text-slate-400 hover:bg-slate-800/60 hover:text-slate-100"
                 )}
               >
                 <Icon className="h-4 w-4 shrink-0" />
@@ -219,7 +223,7 @@ export function Sidebar() {
                 isOpen ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0"
               )}>
                 <div className="overflow-hidden">
-                  <div className="mt-0.5 ml-4 pl-3 border-l border-gray-700 space-y-0.5 pb-0.5">
+                  <div className="mt-0.5 ml-4 pl-3 border-l border-slate-800 space-y-0.5 pb-0.5">
                     {item.children.map((child) => {
                       const [childPath, childQuery] = child.href.split("?");
                       const childType = new URLSearchParams(childQuery ?? "").get("type") ?? "";
@@ -228,11 +232,12 @@ export function Sidebar() {
                         <Link
                           key={child.href}
                           href={child.href}
+                          onClick={() => setMobileOpen(false)}
                           className={cn(
-                            "block rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
+                            "block rounded-lg px-3 py-1.5 text-xs font-medium transition-colors",
                             isChildActive
-                              ? "bg-blue-600 text-white"
-                              : "text-gray-400 hover:bg-gray-800 hover:text-gray-100"
+                              ? "bg-primary text-primary-foreground"
+                              : "text-slate-400 hover:bg-slate-800/60 hover:text-slate-100"
                           )}
                         >
                           {child.label}
@@ -248,20 +253,20 @@ export function Sidebar() {
       </nav>
 
       {/* User + sign out */}
-      <div className="border-t border-gray-700 px-4 py-4 space-y-3">
+      <div className="border-t border-slate-800 px-4 py-4 space-y-3">
         <div className="flex items-center gap-3 px-1">
-          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-blue-600 text-xs font-bold uppercase">
+          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary text-primary-foreground text-xs font-bold uppercase">
             {session?.user?.name?.[0] ?? "?"}
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium text-gray-100">
+            <p className="text-sm font-medium text-slate-100">
               {session?.user?.name}
             </p>
             <div className="flex items-center gap-1">
               {role === "super-admin" && (
                 <Crown className="h-3 w-3 text-yellow-400" />
               )}
-              <p className="truncate text-xs text-gray-400">
+              <p className="truncate text-xs text-slate-400">
                 {roleBadgeLabel(role)}
               </p>
             </div>
@@ -269,12 +274,38 @@ export function Sidebar() {
         </div>
         <button
           onClick={() => signOut({ callbackUrl: "/login" })}
-          className="flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm text-gray-400 hover:bg-gray-800 hover:text-gray-100 transition-colors"
+          className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm text-slate-400 hover:bg-slate-800/60 hover:text-slate-100 transition-colors"
         >
           <LogOut className="h-4 w-4" />
           Sign out
         </button>
       </div>
-    </aside>
+    </>
+  );
+
+  return (
+    <>
+      {/* Mobile drawer */}
+      <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
+        <SheetTrigger asChild>
+          <button
+            aria-label="Open navigation menu"
+            className="fixed left-3 top-3 z-40 inline-flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-card text-foreground shadow-sm lg:hidden"
+          >
+            <Menu className="h-4 w-4" />
+          </button>
+        </SheetTrigger>
+        <SheetContent side="left" className="flex w-72 flex-col gap-0 border-slate-800 bg-[#0b1120] p-0 text-slate-100">
+          <SheetTitle className="sr-only">Navigation</SheetTitle>
+          <SheetDescription className="sr-only">Main navigation menu</SheetDescription>
+          {navContent}
+        </SheetContent>
+      </Sheet>
+
+      {/* Desktop */}
+      <aside className="hidden h-screen w-64 flex-col border-r border-slate-800 bg-[#0b1120] text-slate-100 lg:flex">
+        {navContent}
+      </aside>
+    </>
   );
 }

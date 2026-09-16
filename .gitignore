@@ -174,8 +174,8 @@ $RECYCLE.BIN/
 # ============================================================
 
 *.log
-logs/
-log/
+/logs/
+/log/
 npm-debug.log*
 yarn-debug.log*
 pnpm-debug.log*
@@ -252,6 +252,18 @@ dataset/
 *.local
 config.local.*
 settings.local.*
+
+# ============================================================
+# UI REDESIGN — VERIFICATION ARTIFACTS
+# ============================================================
+
+# Playwright before/after screenshots (docs/design/baselines/README.md)
+artifacts/
+
+# Playwright MCP tool session output (console logs, snapshots) and the
+# Playwright test runner's own report/output directory — ephemeral, never committed.
+.playwright-mcp/
+test-results/
 
 # ============================================================
 # LOCK FILES - KEEP THESE IN GIT
