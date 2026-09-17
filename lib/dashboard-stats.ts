@@ -140,7 +140,7 @@ export async function getDomainStats(role: string, myId: string, groupMemberIds:
     Website.countDocuments(websiteScope),
     Website.aggregate([
       { $match: websiteScope },
-      { $group: { _id: null, n: { $sum: { $size: "$sitemaps" } } } },
+      { $group: { _id: null, n: { $sum: { $size: { $ifNull: ["$sitemaps", []] } } } } },
     ]),
     role === "super-admin" ? null : Website.find(websiteScope).distinct("_id"),
   ]);
