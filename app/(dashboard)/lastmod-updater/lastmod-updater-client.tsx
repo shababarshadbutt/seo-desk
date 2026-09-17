@@ -1,10 +1,13 @@
 "use client";
 
 import { useState } from "react";
-import { Server, Cloud, Link as LinkIcon, RefreshCw } from "lucide-react";
+import { Server, Cloud, Link as LinkIcon, RefreshCw, ListChecks } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
+import { StepBadge } from "@/components/ui/step-badge";
+import { TabButton } from "@/components/tab-button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { TerminalOutput, type RunStatus } from "@/components/terminal-output";
 import { cn } from "@/lib/utils";
@@ -317,18 +320,22 @@ export function LastmodUpdaterClient() {
       )}
 
       {/* 1. Source */}
-      <div className="rounded-xl border border-border bg-card p-6 shadow-sm space-y-4">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <h3 className="font-semibold">1. Source</h3>
-            <p className="text-sm text-muted-foreground">Choose where this domain&apos;s current sitemaps live.</p>
+      <Card>
+        <CardHeader className="flex flex-col gap-3 border-b-0 px-6 pt-6 pb-0 sm:flex-row sm:items-start sm:justify-between">
+          <div className="flex items-start gap-3">
+            <StepBadge step={1} state={hasFetched ? "complete" : "current"} />
+            <div>
+              <CardTitle className="text-base">Source</CardTitle>
+              <p className="text-sm text-muted-foreground mt-0.5">Choose where this domain&apos;s current sitemaps live.</p>
+            </div>
           </div>
           {lastSyncedVia && (
-            <span className="hidden sm:inline-flex items-center gap-1.5 rounded-full border border-border bg-muted/40 px-2.5 py-1 text-xs text-muted-foreground shrink-0">
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-muted/40 px-2.5 py-1 text-xs text-muted-foreground shrink-0">
               <Cloud className="h-3 w-3" /> Last synced: just now via {lastSyncedVia}
             </span>
           )}
-        </div>
+        </CardHeader>
+        <CardContent className="space-y-4 px-6 pb-6 pt-4">
 
         <div className="flex rounded-lg border border-border p-1 bg-muted/40 w-fit">
           <TabButton active={sourceTab === "sftp"} onClick={() => switchSourceTab("sftp")} icon={<Server className="h-4 w-4" />}>
@@ -384,24 +391,32 @@ export function LastmodUpdaterClient() {
             {indexFilename ? <> · index: <span className="font-mono">{indexFilename}</span></> : " · no sitemap-index.xml found"}
           </p>
         )}
-      </div>
+        </CardContent>
+      </Card>
 
       {/* 2. Scope */}
-      <div className="rounded-xl border border-border bg-card p-6 shadow-sm space-y-4">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <h3 className="font-semibold">2. Scope</h3>
-            <p className="text-sm text-muted-foreground">Choose which files get a new &lt;lastmod&gt;.</p>
+      <Card>
+        <CardHeader className="flex flex-col gap-3 border-b-0 px-6 pt-6 pb-0 sm:flex-row sm:items-start sm:justify-between">
+          <div className="flex items-start gap-3">
+            <StepBadge step={2} state={!hasFetched ? "upcoming" : status === "success" ? "complete" : "current"} />
+            <div>
+              <CardTitle className="text-base">Scope</CardTitle>
+              <p className="text-sm text-muted-foreground mt-0.5">Choose which files get a new &lt;lastmod&gt;.</p>
+            </div>
           </div>
           {hasFetched && (
             <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-muted/40 px-2.5 py-1 text-xs font-medium shrink-0">
               {leafFiles.length} Sitemap{leafFiles.length === 1 ? "" : "s"} Discovered
             </span>
           )}
-        </div>
+        </CardHeader>
+        <CardContent className="space-y-4 px-6 pb-6 pt-4">
 
         {!hasFetched ? (
-          <p className="text-sm text-muted-foreground">Fetch a domain&apos;s files above to choose a scope.</p>
+          <div className="flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-border py-10 text-center">
+            <ListChecks className="h-6 w-6 text-muted-foreground/60" />
+            <p className="text-sm text-muted-foreground">Fetch a domain&apos;s files above to choose a scope.</p>
+          </div>
         ) : (
           <>
             <div className="flex rounded-lg border border-border p-1 bg-muted/40 w-fit">
@@ -443,24 +458,47 @@ export function LastmodUpdaterClient() {
                         </td>
                         <td className="px-3 py-2 font-mono truncate max-w-[220px]">{f.filename}</td>
                         <td
-                          className="px-3 py-2 text-muted-foreground"
+                          className="px-3 py-2 font-mono text-muted-foreground"
                           title="Placeholder — file contents aren't parsed at discovery time yet"
                         >
                           {fakeUrlCountFor(f.filename)}
                         </td>
                         <td
-                          className="px-3 py-2 text-muted-foreground"
+                          className="px-3 py-2 font-mono text-muted-foreground"
                           title="Placeholder — file contents aren't parsed at discovery time yet"
                         >
                           {fakeLastmodFor(f.filename)}
                         </td>
-                        <td className="px-3 py-2 text-right text-muted-foreground whitespace-nowrap">
+                        <td className="px-3 py-2 text-right font-mono text-muted-foreground whitespace-nowrap">
                           {formatBytes(f.sizeBytes)}
                         </td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
+              </div>
+            )}
+
+            {scopeTab === "selected" && leafFiles.length > 0 && (
+              <div className="flex items-center justify-between text-xs text-muted-foreground">
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    className="text-primary hover:underline"
+                    onClick={() => setSelectedFiles(new Set(leafFiles.map((f) => f.filename)))}
+                  >
+                    Select all
+                  </button>
+                  <span>•</span>
+                  <button
+                    type="button"
+                    className="text-muted-foreground hover:text-foreground"
+                    onClick={() => setSelectedFiles(new Set())}
+                  >
+                    Deselect all
+                  </button>
+                </div>
+                <span>{selectedFiles.size} of {leafFiles.length} selected</span>
               </div>
             )}
 
@@ -492,14 +530,19 @@ export function LastmodUpdaterClient() {
             )}
           </>
         )}
-      </div>
+        </CardContent>
+      </Card>
 
       {/* 3. Date & push */}
-      <div className="rounded-xl border border-border bg-card p-6 shadow-sm space-y-4">
-        <div>
-          <h3 className="font-semibold">3. Date &amp; push</h3>
-          <p className="text-sm text-muted-foreground">Defaults to today — pick another date if needed.</p>
-        </div>
+      <Card>
+        <CardHeader className="flex items-start gap-3 border-b-0 px-6 pt-6 pb-0">
+          <StepBadge step={3} state={status === "success" ? "complete" : hasFetched ? "current" : "upcoming"} />
+          <div>
+            <CardTitle className="text-base">Date &amp; push</CardTitle>
+            <p className="text-sm text-muted-foreground mt-0.5">Defaults to today — pick another date if needed.</p>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-4 px-6 pb-6 pt-4">
 
         <div className="space-y-2 max-w-sm">
           <Label htmlFor="lastmod-date">New lastmod date</Label>
@@ -535,7 +578,8 @@ export function LastmodUpdaterClient() {
         </Button>
 
         {status !== "idle" && <TerminalOutput lines={lines} status={status} />}
-      </div>
+        </CardContent>
+      </Card>
 
       {/* Missing-index confirm dialog */}
       <Dialog open={showCreateIndexDialog} onOpenChange={setShowCreateIndexDialog}>
@@ -574,31 +618,5 @@ export function LastmodUpdaterClient() {
         </DialogContent>
       </Dialog>
     </div>
-  );
-}
-
-function TabButton({
-  active,
-  onClick,
-  icon,
-  children,
-}: {
-  active: boolean;
-  onClick: () => void;
-  icon?: React.ReactNode;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn(
-        "flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors",
-        active ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
-      )}
-    >
-      {icon}
-      {children}
-    </button>
   );
 }

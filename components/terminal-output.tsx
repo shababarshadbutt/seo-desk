@@ -88,7 +88,7 @@ export function TerminalOutput({ lines, status, progress }: TerminalOutputProps)
       )}
 
       {/* Output body */}
-      <div ref={bodyRef} className="bg-gray-950 px-4 py-3 font-mono text-xs text-gray-200 overflow-y-auto max-h-[480px] min-h-[200px]">
+      <div ref={bodyRef} className="bg-gray-950 px-4 py-3 font-mono text-xs text-gray-200 overflow-y-auto max-h-[480px] min-h-[140px]">
         {status === "idle" ? (
           <span className="text-gray-600">Run the script to see output here…</span>
         ) : lines.length === 0 ? (

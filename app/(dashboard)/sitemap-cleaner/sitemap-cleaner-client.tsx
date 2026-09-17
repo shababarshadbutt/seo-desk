@@ -5,6 +5,10 @@ import { Upload, Server, Cloud, Link as LinkIcon, RefreshCw, Download } from "lu
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
+import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
+import { StepBadge } from "@/components/ui/step-badge";
+import { TabButton } from "@/components/tab-button";
 import { TerminalOutput, type RunStatus } from "@/components/terminal-output";
 import { cn } from "@/lib/utils";
 
@@ -276,25 +280,26 @@ export function SitemapCleanerClient() {
         </div>
       )}
 
-      {/* Settings */}
-      <div className="rounded-xl border border-border bg-card p-6 shadow-sm space-y-4">
-        <div>
-          <h3 className="font-semibold">Settings</h3>
-          <p className="text-sm text-muted-foreground">Only URLs belonging to this domain are kept.</p>
-        </div>
+      {/* 1. Settings */}
+      <Card>
+        <CardHeader className="flex items-start gap-3 border-b-0 px-6 pt-6 pb-0">
+          <StepBadge step={1} state="current" />
+          <div>
+            <CardTitle className="text-base">Settings</CardTitle>
+            <p className="text-sm text-muted-foreground mt-0.5">Only URLs belonging to this domain are kept.</p>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-4 px-6 pb-6 pt-4">
 
-        <div className="grid gap-4 sm:grid-cols-2">
+        <div className={cn("grid gap-4", sourceTab === "upload" ? "sm:grid-cols-2" : "sm:grid-cols-1")}>
           {sourceTab === "upload" && (
             <div className="space-y-2">
               <div className="flex items-center gap-2">
                 <Label htmlFor="upload-domain">Website Domain</Label>
                 {uploadDomain.trim() && (
-                  <span
-                    className="inline-flex items-center gap-1 rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2 py-0.5 text-[11px] font-medium text-emerald-700 dark:text-emerald-400"
-                    title="Placeholder — no real domain/DNS verification is performed"
-                  >
+                  <Badge variant="success" title="Placeholder — no real domain/DNS verification is performed">
                     Domain Verified
-                  </span>
+                  </Badge>
                 )}
               </div>
               <Input
@@ -335,21 +340,26 @@ export function SitemapCleanerClient() {
             </label>
           </div>
         </div>
-      </div>
+        </CardContent>
+      </Card>
 
-      {/* Source */}
-      <div className="rounded-xl border border-border bg-card p-6 shadow-sm space-y-4">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <h3 className="font-semibold">Source</h3>
-            <p className="text-sm text-muted-foreground">Choose where the sitemap files come from.</p>
+      {/* 2. Source */}
+      <Card>
+        <CardHeader className="flex flex-col gap-3 border-b-0 px-6 pt-6 pb-0 sm:flex-row sm:items-start sm:justify-between">
+          <div className="flex items-start gap-3">
+            <StepBadge step={2} state={!hasFetched && sourceTab !== "upload" ? "upcoming" : "current"} />
+            <div>
+              <CardTitle className="text-base">Source</CardTitle>
+              <p className="text-sm text-muted-foreground mt-0.5">Choose where the sitemap files come from.</p>
+            </div>
           </div>
           {hasFetched && (
             <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-muted/40 px-2.5 py-1 text-xs font-medium shrink-0">
               {fetchedFileCount} Sitemap{fetchedFileCount === 1 ? "" : "s"} Discovered
             </span>
           )}
-        </div>
+        </CardHeader>
+        <CardContent className="space-y-4 px-6 pb-6 pt-4">
 
         <div className="flex flex-wrap rounded-lg border border-border p-1 bg-muted/40 w-fit">
           <TabButton active={sourceTab === "upload"} onClick={() => switchSourceTab("upload")} icon={<Upload className="h-4 w-4" />}>
@@ -440,13 +450,17 @@ export function SitemapCleanerClient() {
                         <tr>
                           <th className="px-3 py-2 text-left font-medium text-muted-foreground text-xs uppercase tracking-wide">Sitemap File</th>
                           <th className="px-3 py-2 text-right font-medium text-muted-foreground text-xs uppercase tracking-wide">Size</th>
+                          <th className="px-3 py-2 text-left font-medium text-muted-foreground text-xs uppercase tracking-wide">Status</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-border">
                         {fetchedFiles.map((f) => (
                           <tr key={f.loc}>
                             <td className="px-3 py-2 font-mono truncate max-w-[280px]">{f.filename}</td>
-                            <td className="px-3 py-2 text-right text-muted-foreground whitespace-nowrap">{formatBytes(f.sizeBytes)}</td>
+                            <td className="px-3 py-2 text-right font-mono text-muted-foreground whitespace-nowrap">{formatBytes(f.sizeBytes)}</td>
+                            <td className="px-3 py-2">
+                              <Badge variant="info">Ready to clean</Badge>
+                            </td>
                           </tr>
                         ))}
                       </tbody>
@@ -457,14 +471,19 @@ export function SitemapCleanerClient() {
             )}
           </>
         )}
-      </div>
+        </CardContent>
+      </Card>
 
-      {/* Output */}
-      <div className="rounded-xl border border-border bg-card p-6 shadow-sm space-y-4">
-        <div>
-          <h3 className="font-semibold">Output</h3>
-          <p className="text-sm text-muted-foreground">Choose what happens with the cleaned files.</p>
-        </div>
+      {/* 3. Output */}
+      <Card>
+        <CardHeader className="flex items-start gap-3 border-b-0 px-6 pt-6 pb-0">
+          <StepBadge step={3} state={status === "success" ? "complete" : canRun ? "current" : "upcoming"} />
+          <div>
+            <CardTitle className="text-base">Output</CardTitle>
+            <p className="text-sm text-muted-foreground mt-0.5">Choose what happens with the cleaned files.</p>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-4 px-6 pb-6 pt-4">
 
         <div className="flex rounded-lg border border-border p-1 bg-muted/40 w-fit">
           <TabButton active={outputTab === "zip"} onClick={() => setOutputTab("zip")} icon={<Download className="h-4 w-4" />}>
@@ -502,33 +521,8 @@ export function SitemapCleanerClient() {
             </ul>
           </div>
         )}
-      </div>
+        </CardContent>
+      </Card>
     </div>
-  );
-}
-
-function TabButton({
-  active,
-  onClick,
-  icon,
-  children,
-}: {
-  active: boolean;
-  onClick: () => void;
-  icon?: React.ReactNode;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn(
-        "flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors",
-        active ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
-      )}
-    >
-      {icon}
-      {children}
-    </button>
   );
 }
