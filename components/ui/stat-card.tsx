@@ -1,4 +1,4 @@
-import type { ElementType } from "react";
+import type { ElementType, ReactNode } from "react";
 import { ArrowDown, ArrowUp, Minus } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -40,6 +40,9 @@ export function StatCard({
   delta,
   breakdown,
   caption,
+  valueSuffix,
+  badge,
+  loading,
 }: {
   icon: ElementType;
   label: string;
@@ -48,6 +51,12 @@ export function StatCard({
   delta?: StatCardDelta;
   breakdown?: StatCardBreakdownItem[];
   caption?: string;
+  /** Rendered right after the value, e.g. "/ 100". */
+  valueSuffix?: string;
+  /** Rendered at the end of the value row, e.g. a status Badge. */
+  badge?: ReactNode;
+  /** Shows a skeleton in place of the value — for data that loads after first paint. */
+  loading?: boolean;
 }) {
   return (
     <div className="rounded-xl border border-border bg-card p-4 space-y-2">
@@ -59,7 +68,13 @@ export function StatCard({
       </div>
 
       <div className="flex items-baseline gap-2">
-        <p className="text-2xl font-bold text-foreground leading-none">{value.toLocaleString()}</p>
+        {loading ? (
+          <span className="h-7 w-16 animate-pulse rounded bg-muted" />
+        ) : (
+          <p className="text-2xl font-bold text-foreground leading-none">{value.toLocaleString()}</p>
+        )}
+        {!loading && valueSuffix && <span className="text-xs font-medium text-muted-foreground">{valueSuffix}</span>}
+        {!loading && badge && <span className="ml-auto">{badge}</span>}
         {delta && (
           <span
             className={cn(

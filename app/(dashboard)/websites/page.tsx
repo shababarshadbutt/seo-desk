@@ -48,6 +48,7 @@ export default async function WebsitesPage() {
       url:        w.url ?? "",
       assignedTo: w.assignedTo.map((a) => ({ userId: a.userId, userName: a.userName })),
       createdAt:  w.createdAt.toISOString(),
+      updatedAt:  (w.updatedAt ?? w.createdAt).toISOString(),
       // automation fields — only populated for super-admin
       automationEnabled:     role === "super-admin" ? !!(raw.automationEnabled)                                                        : false,
       automationStartDate:   role === "super-admin" ? ((raw.automationStartDate as Date | null)?.toISOString() ?? null)              : null,

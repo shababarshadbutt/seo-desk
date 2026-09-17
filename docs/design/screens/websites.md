@@ -49,7 +49,33 @@ Related presentation:
 
 ## Stitch vs. real data — content gap (same pattern as Login/Dashboard)
 
-The Stitch mockup invents a much richer table than the real data model supports: fake CMS/framework detection badges, fake "Health Score" percentages, fake "Last Audited"/"Last Crawled" timestamps, bulk-select checkboxes (no bulk-action capability exists), and a top row of 4 fabricated summary stat cards (fake site counts, fake avg health score, fake automation/action-required counts unrelated to real `Website` schema fields). **None of this will be implemented** — same no-invented-functionality/data rule as prior screens. Only the real columns (Website, URL, Assigned Members, Automation badge, row actions) get the Stitch visual treatment (rounded-xl table container, row styling, pill/badge styling, avatar-style member chips).
+The Stitch mockup invents a much richer table than the real data model supports: fake CMS/framework detection badges, fake "Health Score" percentages, fake "Last Audited"/"Last Crawled" timestamps, bulk-select checkboxes, and a top row of 4 fabricated summary stat cards. At the time this note was first written, **none of this was implemented**. Both decisions have since been superseded:
+
+- Bulk-select + bulk actions (enable/disable automation, delete) were built for real in Part B (see `PROGRESS.md`).
+- CMS/Stack, SEO Health, and the 4 KPI cards were built in **Part G** (2026-09-17) — see below.
+
+## Part G — pixel-fidelity pass: CMS/Stack, SEO Health, KPI cards, filters, pagination (2026-09-17)
+
+Explicitly authorized by the user to build the previously-omitted Stitch elements as real functionality, following the exact placeholder-data pattern already established for `WebsiteProfile.industry` (Part F, Weekly Reports) and the presentational-status-pill pattern in `components/topbar.tsx`.
+
+**New WebsiteProfile fields** (`lib/mongodb/models/WebsiteProfile.ts`, additive only — `industry`/`isPlaceholder` untouched, protected `Website` model never touched):
+- `platform` / `platformIsPlaceholder` — CMS/tech-stack, deterministic hash-seeded pool (`lib/fake-website-platforms.ts`, salted `id + "-platform"` so it doesn't correlate with the industry hash).
+- `healthScore` / `healthIsPlaceholder` — SEO health 0-100, deterministic hash-seeded (`lib/fake-website-health.ts`, salted `id + "-seo-health"`, skewed distribution: ~4-5% critical, ~15% notice, rest healthy). The **thresholds** (≥90 healthy / 75-89 notice / <75 critical) are real shared policy, not placeholder — taken directly from Stitch's own filter copy.
+- `GET /api/website-profiles` seeds new docs with all fields and **backfills** existing Part-F-era docs (industry-only) so nothing renders blank for websites already touched by Weekly Reports.
+- `PATCH /api/website-profiles/[websiteId]` now accepts optional `platform`/`healthScore` alongside `industry`, each clearing its own placeholder flag — the "editable to a real value later" half of the pattern (no UI calls this for platform/health yet — a natural follow-up).
+
+**Known Placeholders** (disclosed via `title` tooltips in the UI, per this app's honesty-in-comments convention):
+- CMS/Stack badge value — no real CMS detection exists.
+- SEO Health score/pill and the "Average Health Score" / "Needs Review" KPI cards — no real health-check/monitoring exists.
+
+**Real, non-placeholder additions**:
+- "Last Updated" column — the real `Website.updatedAt` (added to the `WebsiteRow` DTO in `page.tsx`), honestly relabeled from Stitch's "Last Crawled" since no crawl timestamp exists.
+- Client-side search (name/URL), Industry/Platform/Health filters (options derived from loaded data), "My Assigned Only" (now uses the previously-unused `currentUserId` prop), sort (name/health/last-updated), pagination (12/25/50/100 rows), Export CSV (client-side, escapes commas, omits the automation column for non-super-admin).
+- "Audit" quick action navigates to the existing `/audit` page (no prefill — `/audit` reads no searchParams, a follow-up if wanted). "Fix Crawl" (shown for non-healthy rows, super-admin only) opens the existing Automation Settings dialog — zero new logic, just a new entry point.
+- New shared `components/ui/avatar-chip.tsx` (+ `lib/avatar.ts`) — extracted the initials/color-chip pattern that was previously duplicated across Indexing Queue, Website Audit, Weekly Reports, and this screen's own Assign form.
+- `components/ui/badge.tsx` gained a soft `danger` variant (Critical health pill); `components/ui/stat-card.tsx` gained optional `valueSuffix`/`badge`/`loading` props (all additive, existing call sites unaffected).
+
+All existing role gating (`isSuperAdmin`, `canFilter`), dialogs, and API contracts preserved exactly — verified live via Playwright (functional regression + all new behavior, both themes, 1440×900/1024×768/390×844, 0 console errors).
 
 ## Pre-existing responsive defect confirmed at 390×844 baseline
 

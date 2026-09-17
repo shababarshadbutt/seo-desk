@@ -1,12 +1,23 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Pencil, Trash2, Loader2, Users, Globe, ExternalLink, UserPlus, Zap, X, AlertTriangle } from "lucide-react";
+import {
+  Plus, Pencil, Trash2, Loader2, Users, Globe, ExternalLink, UserPlus, Zap, X, AlertTriangle,
+  Search, Download, RotateCw, ChevronLeft, ChevronRight, ClipboardCheck, Wrench,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
+import { Card, CardContent } from "@/components/ui/card";
+import { StatCard } from "@/components/ui/stat-card";
+import { AvatarChip } from "@/components/ui/avatar-chip";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import {
+  fakeHealthScoreForWebsite, websiteHealthStatus, HEALTH_STATUS_LABEL, HEALTH_STATUS_BADGE_VARIANT,
+  type WebsiteHealthStatus,
+} from "@/lib/fake-website-health";
 import { cn } from "@/lib/utils";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -17,6 +28,7 @@ export interface WebsiteRow {
   url: string;
   assignedTo: { userId: string; userName: string }[];
   createdAt: string;
+  updatedAt: string;
   automationEnabled:     boolean;
   automationStartDate:   string | null;
   gscServiceAccountName: string;
@@ -30,6 +42,15 @@ export interface MemberOption {
   name: string;
 }
 
+interface WebsiteProfileEntry {
+  industry:              string;
+  isPlaceholder:         boolean;
+  platform:              string;
+  platformIsPlaceholder: boolean;
+  healthScore:           number | null;
+  healthIsPlaceholder:   boolean;
+}
+
 interface Props {
   websites:            WebsiteRow[];
   members:             MemberOption[];
@@ -38,9 +59,56 @@ interface Props {
   serviceAccountNames: string[];
 }
 
+type SortKey = "name-asc" | "name-desc" | "health-desc" | "health-asc" | "updated-desc" | "updated-asc";
+
+const SORT_OPTIONS: { value: SortKey; label: string }[] = [
+  { value: "name-asc",     label: "Website Name (A–Z)" },
+  { value: "name-desc",    label: "Website Name (Z–A)" },
+  { value: "health-desc",  label: "SEO Health (High–Low)" },
+  { value: "health-asc",   label: "SEO Health (Low–High)" },
+  { value: "updated-desc", label: "Last Updated (Newest)" },
+  { value: "updated-asc",  label: "Last Updated (Oldest)" },
+];
+
+const HEALTH_FILTER_OPTIONS: { value: "" | WebsiteHealthStatus; label: string }[] = [
+  { value: "",         label: "Health: All Statuses" },
+  { value: "healthy",  label: "Healthy (≥90%)" },
+  { value: "notice",   label: "Needs Attention (75–89%)" },
+  { value: "critical", label: "Critical (<75%)" },
+];
+
+const PAGE_SIZE_OPTIONS = [12, 25, 50, 100];
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function formatRelativeTime(iso: string): string {
+  const diffMs = Date.now() - new Date(iso).getTime();
+  const mins = Math.round(diffMs / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.round(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.round(hours / 24);
+  if (days < 30) return `${days}d ago`;
+  // Explicit locale — server and client can otherwise disagree on the
+  // default locale (e.g. en-GB vs en-US), causing a hydration mismatch.
+  return new Date(iso).toLocaleDateString("en-GB");
+}
+
+function csvValue(v: string | number): string {
+  const s = String(v);
+  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+function chunk<T>(arr: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
+}
+
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
-export function WebsitesClient({ websites: initial, members, viewerRole, serviceAccountNames }: Props) {
+export function WebsitesClient({ websites: initial, members, viewerRole, currentUserId, serviceAccountNames }: Props) {
   const router = useRouter();
   const [websites, setWebsites]       = useState(initial);
   const [addOpen,    setAddOpen]       = useState(false);
@@ -53,16 +121,111 @@ export function WebsitesClient({ websites: initial, members, viewerRole, service
   const [bulkAction, setBulkAction]    = useState<"delete" | "enableAutomation" | "disableAutomation" | null>(null);
   const [bulkBusy,   setBulkBusy]      = useState(false);
   const [bulkResult, setBulkResult]    = useState<{ succeeded: number; skipped: { name: string; reason: string }[] } | null>(null);
+  const [refreshing, setRefreshing]    = useState(false);
 
   const isSuperAdmin = viewerRole === "super-admin";
   const canFilter    = viewerRole === "super-admin" || viewerRole === "sub-lead";
-  const [filterMember, setFilterMember] = useState("");
 
-  const filtered = filterMember
-    ? websites.filter((w) => w.assignedTo.some((a) => a.userId === filterMember))
-    : websites;
+  const [filterMember, setFilterMember]   = useState("");
+  const [query,         setQuery]         = useState("");
+  const [filterIndustry, setFilterIndustry] = useState("");
+  const [filterPlatform, setFilterPlatform] = useState("");
+  const [filterHealth,   setFilterHealth]   = useState<"" | WebsiteHealthStatus>("");
+  const [myAssignedOnly, setMyAssignedOnly] = useState(false);
+  const [sortKey,        setSortKey]        = useState<SortKey>("name-asc");
+  const [page,           setPage]           = useState(1);
+  const [pageSize,       setPageSize]       = useState(12);
+
+  // Part G — per-website industry/platform/health, real (auto-seeded)
+  // WebsiteProfile data. Chunked so the query string stays well under any
+  // request-line limit at a few hundred websites.
+  const [profiles, setProfiles] = useState<Record<string, WebsiteProfileEntry>>({});
+  const [profilesLoading, setProfilesLoading] = useState(true);
+
+  useEffect(() => {
+    const ids = websites.map((w) => w.id);
+    if (ids.length === 0) { setProfilesLoading(false); return; }
+    setProfilesLoading(true);
+    Promise.all(
+      chunk(ids, 100).map((batch) =>
+        fetch(`/api/website-profiles?websiteIds=${batch.join(",")}`).then((res) => (res.ok ? res.json() : {}))
+      )
+    )
+      .then((results) => setProfiles(Object.assign({}, ...results)))
+      .catch(() => setProfiles({}))
+      .finally(() => setProfilesLoading(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [websites.length]);
+
+  function healthOf(id: string): number {
+    return profiles[id]?.healthScore ?? fakeHealthScoreForWebsite(id);
+  }
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return websites.filter((w) => {
+      const matchesQuery = !q || w.name.toLowerCase().includes(q) || w.url.toLowerCase().includes(q);
+      const matchesMember = !filterMember || w.assignedTo.some((a) => a.userId === filterMember);
+      const matchesMine = !myAssignedOnly || w.assignedTo.some((a) => a.userId === currentUserId);
+      const profile = profiles[w.id];
+      const matchesIndustry = !filterIndustry || profile?.industry === filterIndustry;
+      const matchesPlatform = !filterPlatform || profile?.platform === filterPlatform;
+      const matchesHealth = !filterHealth || websiteHealthStatus(healthOf(w.id)) === filterHealth;
+      return matchesQuery && matchesMember && matchesMine && matchesIndustry && matchesPlatform && matchesHealth;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [websites, query, filterMember, myAssignedOnly, filterIndustry, filterPlatform, filterHealth, profiles, currentUserId]);
+
+  const sorted = useMemo(() => {
+    const rows = [...filtered];
+    rows.sort((a, b) => {
+      switch (sortKey) {
+        case "name-desc":    return b.name.localeCompare(a.name);
+        case "health-desc":  return healthOf(b.id) - healthOf(a.id);
+        case "health-asc":   return healthOf(a.id) - healthOf(b.id);
+        case "updated-desc": return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+        case "updated-asc":  return new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime();
+        default:             return a.name.localeCompare(b.name);
+      }
+    });
+    return rows;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filtered, sortKey, profiles]);
+
+  const totalPages = Math.max(1, Math.ceil(sorted.length / pageSize));
+  const currentPage = Math.min(page, totalPages);
+  const paged = useMemo(
+    () => sorted.slice((currentPage - 1) * pageSize, currentPage * pageSize),
+    [sorted, currentPage, pageSize]
+  );
+
+  const industryOptions = useMemo(
+    () => Array.from(new Set(websites.map((w) => profiles[w.id]?.industry).filter(Boolean))).sort() as string[],
+    [websites, profiles]
+  );
+  const platformOptions = useMemo(
+    () => Array.from(new Set(websites.map((w) => profiles[w.id]?.platform).filter(Boolean))).sort() as string[],
+    [websites, profiles]
+  );
+
+  const filtersActive = !!(query || filterMember || filterIndustry || filterPlatform || filterHealth || myAssignedOnly);
+
+  function resetFilters() {
+    setQuery(""); setFilterMember(""); setFilterIndustry(""); setFilterPlatform("");
+    setFilterHealth(""); setMyAssignedOnly(false); setPage(1);
+  }
+
+  function updateFilter<T>(setter: (v: T) => void) {
+    return (v: T) => { setter(v); setPage(1); };
+  }
 
   const automationEnabledCount = websites.filter((w) => w.automationEnabled).length;
+  const distinctAssignees = new Set(websites.flatMap((w) => w.assignedTo.map((a) => a.userId))).size;
+  const avgSitesPerSpecialist = distinctAssignees > 0 ? (websites.length / distinctAssignees).toFixed(1) : "0";
+  const avgHealthScore = websites.length > 0
+    ? websites.reduce((sum, w) => sum + healthOf(w.id), 0) / websites.length
+    : 0;
+  const needsReviewCount = websites.filter((w) => websiteHealthStatus(healthOf(w.id)) !== "healthy").length;
 
   function toggleSelect(id: string) {
     setSelected((prev) => {
@@ -72,10 +235,17 @@ export function WebsitesClient({ websites: initial, members, viewerRole, service
     });
   }
 
-  function toggleSelectAll() {
-    setSelected((prev) =>
-      prev.size === filtered.length ? new Set() : new Set(filtered.map((w) => w.id))
-    );
+  function toggleSelectPage() {
+    setSelected((prev) => {
+      const allOnPage = paged.length > 0 && paged.every((w) => prev.has(w.id));
+      const next = new Set(prev);
+      paged.forEach((w) => (allOnPage ? next.delete(w.id) : next.add(w.id)));
+      return next;
+    });
+  }
+
+  function selectAllFiltered() {
+    setSelected(new Set(filtered.map((w) => w.id)));
   }
 
   async function runBulkAction() {
@@ -152,13 +322,66 @@ export function WebsitesClient({ websites: initial, members, viewerRole, service
     }
   }
 
+  function handleRefresh() {
+    setRefreshing(true);
+    router.refresh();
+    const ids = websites.map((w) => w.id);
+    Promise.all(
+      chunk(ids, 100).map((batch) =>
+        fetch(`/api/website-profiles?websiteIds=${batch.join(",")}`).then((res) => (res.ok ? res.json() : {}))
+      )
+    )
+      .then((results) => setProfiles(Object.assign({}, ...results)))
+      .catch(() => {})
+      .finally(() => setTimeout(() => setRefreshing(false), 500));
+  }
+
+  function exportCsv() {
+    const headers = [
+      "Name", "URL", "Industry", "Platform", "Health Score", "Health Status",
+      "Assigned Members", "Last Updated",
+      ...(isSuperAdmin ? ["Automation Enabled"] : []),
+    ];
+    const lines = [headers.map(csvValue).join(",")];
+    for (const w of sorted) {
+      const profile = profiles[w.id];
+      const score = healthOf(w.id);
+      const row = [
+        csvValue(w.name),
+        csvValue(w.url),
+        csvValue(profile?.industry ?? ""),
+        csvValue(profile?.platform ?? ""),
+        csvValue(score.toFixed(1)),
+        csvValue(HEALTH_STATUS_LABEL[websiteHealthStatus(score)]),
+        csvValue(w.assignedTo.map((a) => a.userName).join("; ")),
+        csvValue(w.updatedAt),
+        ...(isSuperAdmin ? [csvValue(w.automationEnabled ? "Yes" : "No")] : []),
+      ];
+      lines.push(row.join(","));
+    }
+    const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `websites-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  const selectClass = "h-9 rounded-lg border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
+
   return (
     <div className="space-y-5">
 
       {/* Header */}
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>
-          <h2 className="text-2xl font-bold">Websites</h2>
+          <div className="flex items-center gap-2.5 flex-wrap">
+            <h2 className="text-2xl font-bold">Websites Portfolio</h2>
+            <Badge variant="secondary">{filtered.length} of {websites.length} Active</Badge>
+          </div>
           <p className="text-sm text-muted-foreground mt-0.5">
             {isSuperAdmin
               ? `${filtered.length} of ${websites.length} website${websites.length !== 1 ? "s" : ""}`
@@ -166,26 +389,14 @@ export function WebsitesClient({ websites: initial, members, viewerRole, service
           </p>
         </div>
         <div className="flex gap-2 flex-wrap items-center">
-          {canFilter && members.length > 0 && (
-            <div className="flex items-center gap-2">
-              <Label className="text-xs text-muted-foreground whitespace-nowrap">Filter by member:</Label>
-              <select
-                value={filterMember}
-                onChange={(e) => setFilterMember(e.target.value)}
-                className="h-9 rounded-lg border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              >
-                <option value="">All members</option>
-                {members.map((m) => (
-                  <option key={m.id} value={m.id}>{m.name}</option>
-                ))}
-              </select>
-              {filterMember && (
-                <button onClick={() => setFilterMember("")} className="text-xs text-muted-foreground hover:text-foreground underline">
-                  Clear
-                </button>
-              )}
-            </div>
-          )}
+          <Button variant="outline" size="sm" onClick={handleRefresh} disabled={refreshing}>
+            <RotateCw className={cn("h-4 w-4", refreshing && "animate-spin")} />
+            <span className="hidden sm:inline">Refresh</span>
+          </Button>
+          <Button variant="outline" size="sm" onClick={exportCsv}>
+            <Download className="h-4 w-4" />
+            <span className="hidden sm:inline">Export CSV</span>
+          </Button>
           {isSuperAdmin && (
             <Button onClick={() => setAddOpen(true)}>
               <Plus className="h-4 w-4" />
@@ -195,34 +406,139 @@ export function WebsitesClient({ websites: initial, members, viewerRole, service
         </div>
       </div>
 
-      {/* Stat cards */}
-      <div className={cn("grid gap-3", isSuperAdmin ? "grid-cols-2 sm:grid-cols-2 max-w-md" : "grid-cols-1 max-w-xs")}>
-        <div className="rounded-xl border border-border bg-card p-4 flex items-center gap-3">
-          <div className="rounded-lg bg-primary/10 p-2.5 shrink-0">
-            <Globe className="h-4 w-4 text-primary" />
-          </div>
-          <div>
-            <p className="text-2xl font-bold leading-none">{websites.length}</p>
-            <p className="text-xs text-muted-foreground mt-1">Total Websites</p>
-          </div>
-        </div>
-        {isSuperAdmin && (
-          <div className="rounded-xl border border-border bg-card p-4 flex items-center gap-3">
-            <div className="rounded-lg bg-violet-500/10 p-2.5 shrink-0">
-              <Zap className="h-4 w-4 text-violet-600" />
-            </div>
-            <div>
-              <p className="text-2xl font-bold leading-none">{automationEnabledCount}</p>
-              <p className="text-xs text-muted-foreground mt-1">Automation Enabled</p>
-            </div>
-          </div>
-        )}
+      {/* KPI cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
+        <StatCard
+          icon={Globe}
+          label="Total Domains"
+          value={websites.length}
+          color="primary"
+          caption="Aggregated verified domains"
+          breakdown={isSuperAdmin ? [{ label: "Automated", value: automationEnabledCount, tone: "primary" }] : undefined}
+        />
+        <StatCard
+          icon={Zap}
+          label="Average Health Score"
+          value={Math.round(avgHealthScore * 10) / 10}
+          color="emerald"
+          valueSuffix="/ 100"
+          loading={profilesLoading}
+          badge={<Badge variant={HEALTH_STATUS_BADGE_VARIANT[websiteHealthStatus(avgHealthScore)]}>{HEALTH_STATUS_LABEL[websiteHealthStatus(avgHealthScore)]}</Badge>}
+          caption="Placeholder score — no live crawl/monitoring exists yet"
+        />
+        <StatCard
+          icon={Users}
+          label="Assigned Team"
+          value={distinctAssignees}
+          color="primary"
+          caption={`${avgSitesPerSpecialist} avg domains per specialist`}
+        />
+        <StatCard
+          icon={AlertTriangle}
+          label="Needs Review / Audit"
+          value={needsReviewCount}
+          color="amber"
+          loading={profilesLoading}
+          badge={needsReviewCount > 0 ? <Badge variant="warning">Action Req</Badge> : undefined}
+          caption="Sitemap or health review recommended"
+        />
       </div>
+
+      {/* Filter bar */}
+      <Card>
+        <CardContent className="p-3 sm:p-4 space-y-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="relative flex-1 min-w-[200px] max-w-sm">
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+              <input
+                type="text"
+                value={query}
+                onChange={(e) => updateFilter(setQuery)(e.target.value)}
+                placeholder="Filter loaded websites by name or URL…"
+                className="h-9 w-full rounded-lg border border-input bg-background pl-8 pr-3 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              />
+            </div>
+            {canFilter && members.length > 0 && (
+              <select
+                value={filterMember}
+                onChange={(e) => updateFilter(setFilterMember)(e.target.value)}
+                className={cn(selectClass, "min-w-[160px] flex-1 sm:flex-none")}
+              >
+                <option value="">All members ({websites.length})</option>
+                {members.map((m) => (
+                  <option key={m.id} value={m.id}>{m.name}</option>
+                ))}
+              </select>
+            )}
+            <select
+              value={filterIndustry}
+              onChange={(e) => updateFilter(setFilterIndustry)(e.target.value)}
+              className={cn(selectClass, "min-w-[170px] flex-1 sm:flex-none")}
+            >
+              <option value="">All Industries / Sectors</option>
+              {industryOptions.map((i) => <option key={i} value={i}>{i}</option>)}
+            </select>
+            <select
+              value={filterPlatform}
+              onChange={(e) => updateFilter(setFilterPlatform)(e.target.value)}
+              className={cn(selectClass, "min-w-[170px] flex-1 sm:flex-none")}
+            >
+              <option value="">All Platforms (CMS / Stack)</option>
+              {platformOptions.map((p) => <option key={p} value={p}>{p}</option>)}
+            </select>
+            <select
+              value={filterHealth}
+              onChange={(e) => updateFilter(setFilterHealth)(e.target.value as "" | WebsiteHealthStatus)}
+              className={cn(selectClass, "min-w-[170px] flex-1 sm:flex-none")}
+            >
+              {HEALTH_FILTER_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-3 pt-2 border-t border-border">
+            {canFilter && (
+              <label className="flex items-center gap-2 text-sm text-foreground cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={myAssignedOnly}
+                  onChange={(e) => updateFilter(setMyAssignedOnly)(e.target.checked)}
+                  className="h-3.5 w-3.5 rounded border-input accent-primary cursor-pointer"
+                />
+                My Assigned Only
+              </label>
+            )}
+            {filtersActive && (
+              <button onClick={resetFilters} className="text-xs text-muted-foreground hover:text-foreground underline underline-offset-4">
+                Reset Filters
+              </button>
+            )}
+            <div className="flex items-center gap-2 ml-auto text-xs text-muted-foreground">
+              <span>Sort by:</span>
+              <select
+                value={sortKey}
+                onChange={(e) => updateFilter(setSortKey)(e.target.value as SortKey)}
+                className="h-8 rounded-lg border border-input bg-background px-2 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                {SORT_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </select>
+            </div>
+            <span className="text-xs text-muted-foreground whitespace-nowrap">
+              Showing <strong className="text-foreground">{sorted.length === 0 ? 0 : (currentPage - 1) * pageSize + 1}</strong>–<strong className="text-foreground">{Math.min(currentPage * pageSize, sorted.length)}</strong> of <strong className="text-foreground">{sorted.length}</strong>
+              {filtersActive && ` (filtered from ${websites.length})`}
+            </span>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Bulk action bar */}
       {isSuperAdmin && selected.size > 0 && (
         <div className="flex items-center gap-3 rounded-xl border border-primary/30 bg-primary/5 px-4 py-2.5 flex-wrap">
           <p className="text-sm font-medium text-foreground">{selected.size} selected</p>
+          {selected.size < filtered.length && (
+            <button onClick={selectAllFiltered} className="text-xs text-primary hover:underline">
+              Select all {filtered.length} filtered
+            </button>
+          )}
           <div className="flex gap-2 ml-auto flex-wrap">
             <Button size="sm" variant="outline" onClick={() => setBulkAction("enableAutomation")}>
               <Zap className="h-3.5 w-3.5" /> Enable Automation
@@ -271,109 +587,197 @@ export function WebsitesClient({ websites: initial, members, viewerRole, service
           <p className="text-sm text-muted-foreground">
             {websites.length === 0
               ? isSuperAdmin ? "No websites added yet." : "No websites assigned to you yet."
-              : "No websites match the selected filter."}
+              : "No websites match your search or filters."}
           </p>
         </div>
       ) : (
         <div className="rounded-xl border border-border bg-card shadow-sm overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className="w-full text-sm min-w-[1080px]">
             <thead>
               <tr className="border-b border-border bg-muted/40">
                 {isSuperAdmin && (
                   <th className="px-4 py-3 w-10">
                     <input
                       type="checkbox"
-                      checked={filtered.length > 0 && selected.size === filtered.length}
-                      onChange={toggleSelectAll}
+                      checked={paged.length > 0 && paged.every((w) => selected.has(w.id))}
+                      onChange={toggleSelectPage}
                       className="h-4 w-4 rounded border-input accent-primary cursor-pointer"
-                      aria-label="Select all websites"
+                      aria-label="Select all websites on this page"
                     />
                   </th>
                 )}
                 <th className="text-left px-4 py-3 font-medium text-muted-foreground text-xs uppercase tracking-wide whitespace-nowrap">Website</th>
-                <th className="text-left px-4 py-3 font-medium text-muted-foreground text-xs uppercase tracking-wide whitespace-nowrap">URL</th>
+                <th className="text-left px-4 py-3 font-medium text-muted-foreground text-xs uppercase tracking-wide whitespace-nowrap">Live URL</th>
+                <th className="text-left px-4 py-3 font-medium text-muted-foreground text-xs uppercase tracking-wide whitespace-nowrap">CMS / Stack</th>
+                <th className="text-left px-4 py-3 font-medium text-muted-foreground text-xs uppercase tracking-wide whitespace-nowrap">SEO Health</th>
                 <th className="text-left px-4 py-3 font-medium text-muted-foreground text-xs uppercase tracking-wide whitespace-nowrap">Assigned Members</th>
-                {isSuperAdmin && <th className="px-4 py-3 w-36" />}
+                <th className="text-left px-4 py-3 font-medium text-muted-foreground text-xs uppercase tracking-wide whitespace-nowrap">Last Updated</th>
+                <th className="text-right px-4 py-3 font-medium text-muted-foreground text-xs uppercase tracking-wide whitespace-nowrap">Quick Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
-              {filtered.map((w) => (
-                <tr key={w.id} className="hover:bg-muted/20 transition-colors group">
-                  {isSuperAdmin && (
+              {paged.map((w) => {
+                const profile = profiles[w.id];
+                const score = healthOf(w.id);
+                const status = websiteHealthStatus(score);
+                return (
+                  <tr key={w.id} className="hover:bg-muted/20 transition-colors group">
+                    {isSuperAdmin && (
+                      <td className="px-4 py-3">
+                        <input
+                          type="checkbox"
+                          checked={selected.has(w.id)}
+                          onChange={() => toggleSelect(w.id)}
+                          className="h-4 w-4 rounded border-input accent-primary cursor-pointer"
+                          aria-label={`Select ${w.name}`}
+                        />
+                      </td>
+                    )}
                     <td className="px-4 py-3">
-                      <input
-                        type="checkbox"
-                        checked={selected.has(w.id)}
-                        onChange={() => toggleSelect(w.id)}
-                        className="h-4 w-4 rounded border-input accent-primary cursor-pointer"
-                        aria-label={`Select ${w.name}`}
-                      />
+                      <div className="flex items-center gap-3">
+                        <AvatarChip name={w.name} />
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="font-medium text-foreground whitespace-nowrap">{w.name}</span>
+                            {w.automationEnabled && (
+                              <span className="inline-flex items-center gap-1 rounded-full bg-violet-500/10 px-2 py-0.5 text-xs font-medium text-violet-600 border border-violet-500/20">
+                                <Zap className="h-3 w-3" />
+                                Auto
+                              </span>
+                            )}
+                          </div>
+                          {profile?.industry && (
+                            <span className="block text-xs text-muted-foreground">{profile.industry}</span>
+                          )}
+                        </div>
+                      </div>
                     </td>
-                  )}
-                  <td className="px-4 py-3 font-medium whitespace-nowrap">
-                    <div className="flex items-center gap-2">
-                      {w.name}
-                      {w.automationEnabled && (
-                        <span className="inline-flex items-center gap-1 rounded-full bg-violet-500/10 px-2 py-0.5 text-xs font-medium text-violet-600 border border-violet-500/20">
-                          <Zap className="h-3 w-3" />
-                          Auto
-                        </span>
+                    <td className="px-4 py-3 text-muted-foreground">
+                      {w.url ? (
+                        <a href={w.url} target="_blank" rel="noopener noreferrer"
+                          className="flex items-center gap-1 text-primary hover:underline text-xs max-w-[220px]">
+                          <span className="truncate">{w.url.replace(/^https?:\/\/(www\.)?/, "")}</span>
+                          <ExternalLink className="h-3 w-3 shrink-0" />
+                        </a>
+                      ) : (
+                        <span className="text-xs text-muted-foreground/50">—</span>
                       )}
-                    </div>
-                  </td>
-                  <td className="px-4 py-3 text-muted-foreground">
-                    {w.url ? (
-                      <a href={w.url} target="_blank" rel="noopener noreferrer"
-                        className="flex items-center gap-1 text-primary hover:underline text-xs max-w-[220px]">
-                        <span className="truncate">{w.url.replace(/^https?:\/\/(www\.)?/, "")}</span>
-                        <ExternalLink className="h-3 w-3 shrink-0" />
-                      </a>
-                    ) : (
-                      <span className="text-xs text-muted-foreground/50">—</span>
-                    )}
-                  </td>
-                  <td className="px-4 py-3">
-                    {w.assignedTo.length === 0 ? (
-                      <span className="text-xs text-muted-foreground/50">Unassigned</span>
-                    ) : (
-                      <div className="flex flex-wrap gap-1">
-                        {w.assignedTo.map((a) => (
-                          <span key={a.userId}
-                            className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium whitespace-nowrap">
-                            {a.userName}
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                  </td>
-                  {isSuperAdmin && (
+                    </td>
                     <td className="px-4 py-3">
-                      <div className="flex gap-1 justify-end">
-                        <Button variant="ghost" size="sm" className="h-7 px-2 text-xs gap-1 text-violet-600 hover:text-violet-700 hover:bg-violet-500/10"
-                          onClick={() => setAutoItem(w)}>
-                          <Zap className="h-3.5 w-3.5" />
-                          Automation
+                      <Badge
+                        variant="outline"
+                        className="font-mono text-[11px]"
+                        title={profile?.platformIsPlaceholder ? "Placeholder — no CMS detection runs yet" : undefined}
+                      >
+                        {profile?.platform || "—"}
+                      </Badge>
+                    </td>
+                    <td className="px-4 py-3">
+                      <Badge
+                        variant={HEALTH_STATUS_BADGE_VARIANT[status]}
+                        title={profile?.healthIsPlaceholder ? "Placeholder — no live health-check runs yet" : undefined}
+                      >
+                        <span className="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-current opacity-70" />
+                        {score.toFixed(0)}% {HEALTH_STATUS_LABEL[status]}
+                      </Badge>
+                    </td>
+                    <td className="px-4 py-3">
+                      {w.assignedTo.length === 0 ? (
+                        <span className="text-xs text-muted-foreground/50">Unassigned</span>
+                      ) : (
+                        <div className="flex flex-wrap gap-1">
+                          {w.assignedTo.map((a) => (
+                            <span key={a.userId}
+                              className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 pl-0.5 pr-2 py-0.5 text-xs font-medium whitespace-nowrap">
+                              <AvatarChip name={a.userName} size="sm" />
+                              {a.userName}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-muted-foreground font-mono text-[11px] whitespace-nowrap" title={new Date(w.updatedAt).toLocaleString("en-GB")}>
+                      {formatRelativeTime(w.updatedAt)}
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      <div className="flex gap-1 justify-end flex-wrap">
+                        <Button variant="ghost" size="sm" className="h-7 px-2 text-xs gap-1" onClick={() => router.push("/audit")}>
+                          <ClipboardCheck className="h-3.5 w-3.5" />
+                          Audit
                         </Button>
-                        <Button variant="ghost" size="sm" className="h-7 px-2 text-xs gap-1"
-                          onClick={() => setAssignItem(w)}>
-                          <UserPlus className="h-3.5 w-3.5" />
-                          Assign
-                        </Button>
-                        <Button variant="ghost" size="sm" className="h-7 w-7 p-0"
-                          onClick={() => setEditItem(w)}>
-                          <Pencil className="h-3.5 w-3.5" />
-                        </Button>
-                        <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-destructive hover:text-destructive"
-                          onClick={() => setDeleteId(w.id)}>
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </Button>
+                        {isSuperAdmin && status !== "healthy" && (
+                          <Button variant="ghost" size="sm" className="h-7 px-2 text-xs gap-1 text-amber-600 hover:text-amber-700 hover:bg-amber-500/10"
+                            onClick={() => setAutoItem(w)}>
+                            <Wrench className="h-3.5 w-3.5" />
+                            Fix Crawl
+                          </Button>
+                        )}
+                        {isSuperAdmin && (
+                          <>
+                            <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-violet-600 hover:text-violet-700 hover:bg-violet-500/10"
+                              onClick={() => setAutoItem(w)} title="Automation" aria-label="Automation">
+                              <Zap className="h-3.5 w-3.5" />
+                            </Button>
+                            <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => setAssignItem(w)} title="Assign" aria-label="Assign">
+                              <UserPlus className="h-3.5 w-3.5" />
+                            </Button>
+                            <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => setEditItem(w)} title="Edit" aria-label="Edit">
+                              <Pencil className="h-3.5 w-3.5" />
+                            </Button>
+                            <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-destructive hover:text-destructive"
+                              onClick={() => setDeleteId(w.id)} title="Delete" aria-label="Delete">
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
+                          </>
+                        )}
                       </div>
                     </td>
-                  )}
-                </tr>
-              ))}
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
+
+          {/* Pagination footer */}
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 px-4 py-3 border-t border-border text-xs text-muted-foreground">
+            <div className="flex items-center gap-2">
+              <span>
+                Showing <strong className="text-foreground">{sorted.length === 0 ? 0 : (currentPage - 1) * pageSize + 1}</strong> to{" "}
+                <strong className="text-foreground">{Math.min(currentPage * pageSize, sorted.length)}</strong> of{" "}
+                <strong className="text-foreground">{sorted.length}</strong> items
+              </span>
+              <span className="text-muted-foreground/50">•</span>
+              <div className="flex items-center gap-1.5">
+                <span>Rows per page:</span>
+                <select
+                  value={pageSize}
+                  onChange={(e) => { setPageSize(Number(e.target.value)); setPage(1); }}
+                  className="rounded border border-input bg-background px-1.5 py-0.5 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  {PAGE_SIZE_OPTIONS.map((n) => <option key={n} value={n}>{n}</option>)}
+                </select>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <span>Page {currentPage} of {totalPages}</span>
+              <button
+                disabled={currentPage <= 1}
+                onClick={() => setPage(currentPage - 1)}
+                className="p-1.5 rounded-lg border border-input disabled:opacity-40 hover:bg-muted transition-colors"
+                aria-label="Previous page"
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </button>
+              <button
+                disabled={currentPage >= totalPages}
+                onClick={() => setPage(currentPage + 1)}
+                className="p-1.5 rounded-lg border border-input disabled:opacity-40 hover:bg-muted transition-colors"
+                aria-label="Next page"
+              >
+                <ChevronRight className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

@@ -29,18 +29,6 @@ export function fakeSiteId(websiteId: string): string {
   return `${prefix}-${num}-sync`;
 }
 
-// Deterministic per-website accent color — purely cosmetic (avatar chip),
-// derived from the real website name, so it needs no placeholder flag.
-export const AVATAR_COLORS = ["rose", "sky", "amber", "emerald", "violet", "cyan", "orange", "indigo"] as const;
-export type AvatarColor = (typeof AVATAR_COLORS)[number];
-
-export function avatarColor(name: string): AvatarColor {
-  return AVATAR_COLORS[hashString(name) % AVATAR_COLORS.length];
-}
-
-export function initials(name: string): string {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return "??";
-  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
-  return (parts[0][0] + parts[1][0]).toUpperCase();
-}
+// Moved to lib/avatar.ts (the pattern now repeats beyond Indexing Queue) —
+// re-exported here so existing imports from this file keep working.
+export { AVATAR_COLORS, avatarColor, initials, type AvatarColor } from "./avatar";
