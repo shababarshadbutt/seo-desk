@@ -85,3 +85,37 @@ Every one of these is a genuinely real, working CRUD path — not a display-only
 - Extended (not protected): `app/(dashboard)/weekly-reports/page.tsx` (passes `updatedAt` through); `app/(dashboard)/daily-reports/reports-client.tsx` (migrated from the old client-side-only fake title to the new shared `UserProfile` fetch, so both screens now show the same real, DB-backed title per person instead of two independently-computed fakes).
 
 Verified live: tsc/lint/build clean, protected-file guard clean (every backend file new), real stat totals/deltas/donut cross-checked, a real config edit persisted and reverted correctly, Daily Reports re-confirmed unaffected after the title-source migration (same titles render, now DB-backed), existing Add/Edit/Delete/Export/AI-stub flows all re-confirmed working, 0 console errors across desktop/tablet/mobile × Light/Dark.
+
+---
+
+# Part G — Reuse pass + remaining Stitch gaps + PDF stub (2026-09-17)
+
+A direct re-comparison against the actual Stitch mocks turned up a design-system reuse gap (this screen had drifted from components other screens already consolidated onto) plus a handful of visual/functional elements Stitch has that Part F didn't build. Per the user's explicit decision, PDF export is stubbed rather than adding a new PDF-generation dependency.
+
+## Reuse fixes (no new visual pattern — switched to the existing shared component)
+- Local `StatCard` (duplicated icon-box card) → `components/ui/stat-card.tsx`'s shared `StatCard` (same one Websites uses). Widened that shared component in the process: added a `sky` color option and widened `caption` from `string` to `ReactNode` (both additive, non-breaking — verified against Websites' existing plain-string usages).
+- Hand-rolled avatar circle in `MemberSection` → `<AvatarChip>` (`components/ui/avatar-chip.tsx`), the same component already extracted from this exact duplicated pattern on Indexing Queue/Website Audit/Websites.
+- Duplicated `formatRelativeTime` (previously a local function in `websites-client.tsx`) → extracted to `lib/format-relative-time.ts`, imported by both screens.
+
+## New, real, Stitch-matched elements
+- Donut center total ("124 / Total RFQs") — real, `donutTotal`.
+- Bar chart header trend badge ("+N% WoW") — real, same first-half/second-half split already used for the stat-card deltas, applied to combined clicks+rfqs.
+- "View Historical Trends" link next to the Top Contributor line — stub (`useFunctionalityStub`), no trends drill-down view exists yet.
+- "Expand All" / "Collapse All" + "Showing X of Y Specialists" on the grouped section header — real; each member section's open/closed state was lifted from a local `useState` into the parent so it can be controlled in bulk.
+- Per-row "Health Status" badge in the detailed week table — real structure, seeded value: reuses `WebsiteProfile.healthScore`/`healthIsPlaceholder`, already returned by the existing `GET /api/website-profiles` route (used by the Websites screen) and already fetched here for `industryMap` — only the type was widened to also read the fields that were already in the response.
+- "Updated N ago" freshness label next to the Member/Month filters — real, from the max `updatedAt` across the rows the viewer can see.
+- Wording matched to Stitch: "Add Weekly Report" → "Submit Weekly Report"; "Weekly Output Velocity" → "Weekly Clicks & RFQs Velocity".
+
+## New placeholder (added, tracked)
+| Element | Where | What real implementation needs |
+|---|---|---|
+| PDF export | Header, split "CSV / PDF" export control | A PDF-generation library + a new `/api/weekly-reports/export/pdf` route rendering the same rows as CSV. User's explicit decision: stub for now (`useFunctionalityStub`, same convention as AI Executive Summary), CSV stays real and unchanged. |
+
+## Files touched
+- Rewritten (not protected): `app/(dashboard)/weekly-reports/weekly-reports-client.tsx`.
+- Extended (not protected, additive/non-breaking): `components/ui/stat-card.tsx` (`sky` color, `caption: ReactNode`).
+- Extended (not protected): `app/(dashboard)/websites/websites-client.tsx` (now imports `formatRelativeTime` from the new shared file instead of defining it locally).
+- New: `lib/format-relative-time.ts`.
+- No protected file touched; no backend/API/schema change — `/api/website-profiles` already returned everything the Health Status column needed.
+
+Verified: `tsc --noEmit` clean, `next build` clean (0 lint/type errors), all 26 routes built successfully. Live Playwright verification (screen render, responsive, Light/Dark, functional walkthrough) could not be completed this pass — the shared Playwright browser profile was locked by another in-progress session for the whole session, and forcing it closed was avoided since Chrome had ~17 other windows/processes open that weren't ours to close. Stitch Light/Dark reference screenshots were downloaded and reviewed pixel-by-pixel against the code changes above; a live Playwright pass against `http://localhost:3004/weekly-reports` (desktop/tablet/mobile × Light/Dark) is still owed before this can be called fully verified.

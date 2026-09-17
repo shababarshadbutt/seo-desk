@@ -3,15 +3,22 @@
 import { Fragment, useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import {
-  Plus, Pencil, Trash2, Loader2, ChevronDown, ChevronRight, BarChart2, Download, Sparkles,
-  TrendingUp, TrendingDown, Globe, Award, RotateCcw, LayoutGrid, Table2, Settings2, MousePointerClick, Eye, CheckCircle2, FileCheck2,
+  Plus, Pencil, Trash2, Loader2, ChevronDown, ChevronRight, ChevronsDown, ChevronsUp, BarChart2, Download, Sparkles,
+  TrendingUp, TrendingDown, Globe, Award, RotateCcw, LayoutGrid, Table2, Settings2, MousePointerClick, Eye, CheckCircle2, FileCheck2, FileText,
 } from "lucide-react";
 import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis, PieChart, Pie, Cell } from "recharts";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
+import { StatCard } from "@/components/ui/stat-card";
+import { AvatarChip } from "@/components/ui/avatar-chip";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { useFunctionalityStub, FunctionalityStubToast } from "@/components/functionality-stub";
+import {
+  websiteHealthStatus, HEALTH_STATUS_LABEL, HEALTH_STATUS_BADGE_VARIANT,
+} from "@/lib/fake-website-health";
+import { formatRelativeTime } from "@/lib/format-relative-time";
 import { cn } from "@/lib/utils";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -124,6 +131,17 @@ function sumRows(rows: WeeklyReportRow[]) {
   };
 }
 
+// Part G — a StatCard `caption` that flags placeholder-backed sub-metrics
+// the same way the rest of the app does: a small muted dot + hover tooltip.
+function metricCaption(text: string, fake?: boolean) {
+  return (
+    <span className="inline-flex items-center gap-1" title={fake ? "Placeholder — not backed by real data yet" : undefined}>
+      {text}
+      {fake && <span className="h-1 w-1 rounded-full bg-muted-foreground/50 shrink-0" />}
+    </span>
+  );
+}
+
 // Group: userId → monthKey → weekStart → rows
 function groupReports(reports: WeeklyReportRow[]) {
   const byMember = new Map<string, { userName: string; byMonth: Map<string, Map<string, WeeklyReportRow[]>> }>();
@@ -165,6 +183,11 @@ export function WeeklyReportsClient({ reports: initial, assignedWebsites, member
   // Part F — Executive Visuals / Detailed Breakdown tab (grouped roles only)
   const [activeTab, setActiveTab] = useState<"analytics" | "detailed">("analytics");
 
+  // Part G — member sections default open; lifted here (instead of each
+  // MemberSection owning its own useState) so "Expand All"/"Collapse All"
+  // can control every section at once.
+  const [openMemberIds, setOpenMemberIds] = useState<Set<string> | null>(null);
+
   // Part F — real, structured-but-seeded metrics config (weekly click target,
   // SERP visibility index, verified-URL ratio, avg value/quote). Auto-created
   // with placeholder values on first read; editable by super-admin below.
@@ -190,8 +213,14 @@ export function WeeklyReportsClient({ reports: initial, assignedWebsites, member
   }, [members.length]);
 
   // Part F — per-website industry, real (auto-seeded) WebsiteProfile data,
-  // powers the "RFQ Industry Breakdown" donut below.
-  const [industryMap, setIndustryMap] = useState<Record<string, { industry: string; isPlaceholder: boolean }>>({});
+  // powers the "RFQ Industry Breakdown" donut below. Part G widened this to
+  // also carry healthScore/healthIsPlaceholder — already returned by this
+  // same endpoint (used by the Websites screen), just unread here until now
+  // — powers the detailed table's "Health Status" column.
+  const [industryMap, setIndustryMap] = useState<Record<string, {
+    industry: string; isPlaceholder: boolean;
+    healthScore: number | null; healthIsPlaceholder: boolean;
+  }>>({});
   useEffect(() => {
     const ids = Array.from(new Set(reports.map((r) => r.websiteId)));
     if (ids.length === 0) return;
@@ -340,6 +369,43 @@ export function WeeklyReportsClient({ reports: initial, assignedWebsites, member
     return { topContributor: top, conversionRate };
   })();
 
+  // Part G — bar-chart trend badge ("+N% WoW"), same first-half/second-half
+  // split already used for the stat-card deltas above, applied to the
+  // combined clicks+rfqs volume the bar chart itself plots.
+  const barTrendPct = (() => {
+    if (chartData.length < 2) return null;
+    const mid = Math.ceil(chartData.length / 2);
+    const firstHalf = chartData.slice(0, mid);
+    const secondHalf = chartData.slice(mid);
+    const sum = (rows: typeof chartData) => rows.reduce((s, r) => s + r.clicks + r.rfqs, 0);
+    const a = sum(firstHalf);
+    const b = sum(secondHalf);
+    if (a === 0) return b > 0 ? 100 : 0;
+    return Math.round(((b - a) / a) * 1000) / 10;
+  })();
+
+  // Part G — freshness label ("Updated N ago"), real, from the most recent
+  // updatedAt across whatever rows this viewer can see.
+  const mostRecentUpdatedAt = chartSourceRows.reduce<string | null>(
+    (latest, r) => (!latest || r.updatedAt > latest ? r.updatedAt : latest),
+    null
+  );
+
+  // Part G — Expand All/Collapse All over the grouped member sections.
+  // null = "all open" (the original default); an explicit Set tracks
+  // per-member overrides once the viewer starts toggling sections.
+  const groupedIds = Array.from(grouped.keys());
+  function isMemberOpen(userId: string) {
+    return openMemberIds === null || openMemberIds.has(userId);
+  }
+  function toggleMember(userId: string) {
+    setOpenMemberIds((prev) => {
+      const base = prev === null ? new Set(groupedIds) : new Set(prev);
+      if (base.has(userId)) base.delete(userId); else base.add(userId);
+      return base;
+    });
+  }
+
   return (
     <div className="space-y-5">
 
@@ -361,52 +427,68 @@ export function WeeklyReportsClient({ reports: initial, assignedWebsites, member
               AI Executive Summary
             </Button>
           )}
-          <Button variant="outline" asChild>
-            <a href="/api/weekly-reports/export">
+          {/* Part G — split into CSV (real, unchanged) + PDF (stub, matches
+              Stitch's "Export (CSV / PDF)" affordance; no PDF library exists
+              in the app, so this follows the same coming-soon-stub convention
+              already used above for AI Executive Summary). */}
+          <div className="inline-flex rounded-lg border border-input overflow-hidden">
+            <a
+              href="/api/weekly-reports/export"
+              className="inline-flex items-center gap-1.5 px-3 h-9 text-sm font-medium hover:bg-muted/50 transition-colors border-r border-input"
+            >
               <Download className="h-4 w-4" />
-              Export CSV
+              CSV
             </a>
-          </Button>
+            <button
+              type="button"
+              onClick={() => stub.show("PDF export is coming soon — CSV export is available now.")}
+              className="inline-flex items-center gap-1.5 px-3 h-9 text-sm font-medium hover:bg-muted/50 transition-colors"
+            >
+              <FileText className="h-4 w-4" />
+              PDF
+            </button>
+          </div>
           {canSubmit && (
             <Button onClick={() => setAddOpen(true)}>
               <Plus className="h-4 w-4" />
-              Add Weekly Report
+              Submit Weekly Report
             </Button>
           )}
         </div>
       </div>
 
-      {/* ── Stat cards — real totals/deltas, structured-but-seeded sub-metrics (Part F) ── */}
+      {/* ── Stat cards — real totals/deltas, structured-but-seeded sub-metrics (Part F),
+             now on the shared components/ui/stat-card.tsx StatCard (Part G) ── */}
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
         <StatCard
           label="Total Organic Clicks" icon={MousePointerClick} color="primary"
-          value={statTotals.clicks} delta={trendDeltas?.clicks}
-          subMetrics={metricsConfig ? [
-            { label: "Weekly Target", value: metricsConfig.weeklyClickTarget.toLocaleString(), fake: metricsConfig.isPlaceholder },
-            { label: "Achieved", value: `${metricsConfig.weeklyClickTarget > 0 ? Math.round((statTotals.clicks / metricsConfig.weeklyClickTarget) * 100) : 0}%`, fake: metricsConfig.isPlaceholder },
-          ] : []}
+          value={statTotals.clicks}
+          delta={trendDeltas ? { pct: trendDeltas.clicks } : undefined}
+          caption={metricsConfig ? metricCaption(
+            `Weekly Target ${metricsConfig.weeklyClickTarget.toLocaleString()} · Achieved ${metricsConfig.weeklyClickTarget > 0 ? Math.round((statTotals.clicks / metricsConfig.weeklyClickTarget) * 100) : 0}%`,
+            metricsConfig.isPlaceholder
+          ) : undefined}
         />
         <StatCard
           label="Total Impressions" icon={Eye} color="sky"
-          value={statTotals.impressions} delta={trendDeltas?.impressions}
-          subMetrics={[
-            { label: "Managed Domains", value: managedDomains },
-            { label: "Verified Ratio", value: metricsConfig ? `${metricsConfig.verifiedUrlRatio}%` : "—", fake: metricsConfig?.isPlaceholder },
-          ]}
+          value={statTotals.impressions}
+          delta={trendDeltas ? { pct: trendDeltas.impressions } : undefined}
+          caption={metricCaption(
+            `${managedDomains} Managed Domain${managedDomains !== 1 ? "s" : ""}${metricsConfig ? ` · Verified Ratio ${metricsConfig.verifiedUrlRatio}%` : ""}`,
+            metricsConfig?.isPlaceholder
+          )}
         />
         <StatCard
           label="Indexation Footprint" icon={CheckCircle2} color="emerald"
-          value={statTotals.indexation} delta={trendDeltas?.indexation}
-          subMetrics={[
-            { label: "SERP Visibility", value: metricsConfig ? metricsConfig.serpVisibilityIndex : "—", fake: metricsConfig?.isPlaceholder },
-          ]}
+          value={statTotals.indexation}
+          delta={trendDeltas ? { pct: trendDeltas.indexation } : undefined}
+          caption={metricsConfig ? metricCaption(`SERP Visibility Index ${metricsConfig.serpVisibilityIndex}`, metricsConfig.isPlaceholder) : undefined}
         />
         <StatCard
           label="High-Value RFQs" icon={FileCheck2} color="amber"
-          value={statTotals.rfqs} delta={trendDeltas?.rfqs}
-          subMetrics={[
-            { label: "Avg Value/Quote", value: metricsConfig ? `$${metricsConfig.avgValuePerQuote.toLocaleString()}` : "—", fake: metricsConfig?.isPlaceholder },
-          ]}
+          value={statTotals.rfqs}
+          delta={trendDeltas ? { pct: trendDeltas.rfqs } : undefined}
+          caption={metricsConfig ? metricCaption(`Avg Value/Quote $${metricsConfig.avgValuePerQuote.toLocaleString()}`, metricsConfig.isPlaceholder) : undefined}
         />
       </div>
 
@@ -482,6 +564,11 @@ export function WeeklyReportsClient({ reports: initial, assignedWebsites, member
               Reset Filters
             </Button>
           )}
+          {mostRecentUpdatedAt && (
+            <p className="text-xs text-muted-foreground ml-auto">
+              Updated {formatRelativeTime(mostRecentUpdatedAt)}
+            </p>
+          )}
         </div>
       )}
 
@@ -490,7 +577,18 @@ export function WeeklyReportsClient({ reports: initial, assignedWebsites, member
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           {chartData.length > 0 && (
             <div className="rounded-xl border bg-card shadow-sm p-4">
-              <p className="text-sm font-semibold mb-3">Weekly Output Velocity</p>
+              <div className="flex items-center justify-between mb-3 flex-wrap gap-1">
+                <p className="text-sm font-semibold">Weekly Clicks &amp; RFQs Velocity</p>
+                {barTrendPct !== null && (
+                  <span className={cn(
+                    "inline-flex items-center gap-0.5 text-xs font-medium",
+                    barTrendPct >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"
+                  )}>
+                    {barTrendPct >= 0 ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
+                    {barTrendPct >= 0 ? "+" : ""}{barTrendPct}% WoW
+                  </span>
+                )}
+              </div>
               <ResponsiveContainer width="100%" height={240}>
                 <BarChart data={chartData} margin={{ top: 4, right: 8, left: -16, bottom: 4 }}>
                   <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
@@ -510,6 +608,14 @@ export function WeeklyReportsClient({ reports: initial, assignedWebsites, member
                   <>Top Contributor: <span className="font-medium text-foreground">{chartSummary.topContributor.name}</span> ({chartSummary.topContributor.clicks.toLocaleString()} Clicks) · </>
                 )}
                 Conversion Rate: <span className="font-medium text-foreground">{chartSummary.conversionRate}%</span>
+                {" · "}
+                <button
+                  type="button"
+                  onClick={() => stub.show("Historical trend drill-down is coming soon.")}
+                  className="font-medium text-primary hover:underline"
+                >
+                  View Historical Trends
+                </button>
               </p>
             </div>
           )}
@@ -527,14 +633,20 @@ export function WeeklyReportsClient({ reports: initial, assignedWebsites, member
                 </span>
               </div>
               <div className="flex items-center gap-4">
-                <ResponsiveContainer width="50%" height={180}>
-                  <PieChart>
-                    <Pie data={donutData} dataKey="value" nameKey="name" innerRadius={45} outerRadius={70} paddingAngle={2}>
-                      {donutData.map((_, i) => <Cell key={i} fill={DONUT_COLORS[i % DONUT_COLORS.length]} />)}
-                    </Pie>
-                    <Tooltip contentStyle={{ fontSize: 12, borderRadius: 8 }} />
-                  </PieChart>
-                </ResponsiveContainer>
+                <div className="relative w-1/2 shrink-0">
+                  <ResponsiveContainer width="100%" height={180}>
+                    <PieChart>
+                      <Pie data={donutData} dataKey="value" nameKey="name" innerRadius={45} outerRadius={70} paddingAngle={2}>
+                        {donutData.map((_, i) => <Cell key={i} fill={DONUT_COLORS[i % DONUT_COLORS.length]} />)}
+                      </Pie>
+                      <Tooltip contentStyle={{ fontSize: 12, borderRadius: 8 }} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                  <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                    <span className="text-lg font-bold leading-none">{donutTotal.toLocaleString()}</span>
+                    <span className="text-[10px] text-muted-foreground">Total RFQs</span>
+                  </div>
+                </div>
                 <div className="flex-1 space-y-1.5 text-xs">
                   {donutData.map((d, i) => (
                     <div key={d.name} className="flex items-center gap-1.5">
@@ -567,6 +679,29 @@ export function WeeklyReportsClient({ reports: initial, assignedWebsites, member
           </div>
         ) : (
           <div className="space-y-4">
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <p className="text-xs text-muted-foreground">
+                Showing {grouped.size} of {members.length || grouped.size} Specialist{(members.length || grouped.size) !== 1 ? "s" : ""}
+              </p>
+              <div className="flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => setOpenMemberIds(null)}
+                  className="inline-flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground"
+                >
+                  <ChevronsDown className="h-3.5 w-3.5" />
+                  Expand All
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setOpenMemberIds(new Set())}
+                  className="inline-flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground"
+                >
+                  <ChevronsUp className="h-3.5 w-3.5" />
+                  Collapse All
+                </button>
+              </div>
+            </div>
             {Array.from(grouped.entries()).sort(([, a], [, b]) => a.userName.localeCompare(b.userName)).map(([userId, { userName, byMonth }]) => (
               <MemberSection
                 key={userId}
@@ -578,6 +713,9 @@ export function WeeklyReportsClient({ reports: initial, assignedWebsites, member
                 onEdit={setEditItem}
                 onDelete={setDeleteId}
                 title={titleMap[userId]?.title}
+                open={isMemberOpen(userId)}
+                onToggleOpen={() => toggleMember(userId)}
+                websiteHealth={industryMap}
               />
             ))}
           </div>
@@ -643,7 +781,7 @@ export function WeeklyReportsClient({ reports: initial, assignedWebsites, member
       <Dialog open={addOpen} onOpenChange={setAddOpen}>
         <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Add Weekly Report</DialogTitle>
+            <DialogTitle>Submit Weekly Report</DialogTitle>
             <DialogDescription>Submit this week&apos;s performance numbers for your assigned websites.</DialogDescription>
           </DialogHeader>
           <BulkReportForm
@@ -707,62 +845,6 @@ export function WeeklyReportsClient({ reports: initial, assignedWebsites, member
       </Dialog>
 
       <FunctionalityStubToast message={stub.message} onDismiss={stub.dismiss} />
-    </div>
-  );
-}
-
-// ─── Stat card (Part F) ───────────────────────────────────────────────────────
-
-function StatCard({
-  label, icon: Icon, color, value, delta, subMetrics,
-}: {
-  label: string;
-  icon: typeof MousePointerClick;
-  color: "primary" | "sky" | "emerald" | "amber";
-  value: number;
-  delta?: number;
-  subMetrics: { label: string; value: string | number; fake?: boolean }[];
-}) {
-  const colorClass = {
-    primary: "bg-primary/10 text-primary",
-    sky:     "bg-sky-500/10 text-sky-600 dark:text-sky-400",
-    emerald: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
-    amber:   "bg-amber-500/10 text-amber-600 dark:text-amber-400",
-  }[color];
-
-  return (
-    <div className="rounded-xl border bg-card p-4 space-y-3">
-      <div className="flex items-start justify-between gap-2">
-        <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">{label}</p>
-        <div className={cn("rounded-lg p-2 shrink-0", colorClass)}>
-          <Icon className="h-4 w-4" />
-        </div>
-      </div>
-      <div className="flex items-baseline gap-2 flex-wrap">
-        <p className="text-3xl font-bold leading-none">{value.toLocaleString()}</p>
-        {delta !== undefined && (
-          <span className={cn(
-            "inline-flex items-center gap-0.5 text-xs font-medium",
-            delta >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"
-          )}>
-            {delta >= 0 ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
-            {delta >= 0 ? "+" : ""}{delta}%
-          </span>
-        )}
-      </div>
-      {subMetrics.length > 0 && (
-        <div className="flex items-center justify-between border-t pt-2 text-xs">
-          {subMetrics.map((m) => (
-            <div key={m.label} title={m.fake ? "Placeholder — not backed by real data yet" : undefined}>
-              <p className="text-muted-foreground">{m.label}</p>
-              <p className="font-semibold flex items-center gap-1">
-                {m.value}
-                {m.fake && <span className="h-1 w-1 rounded-full bg-muted-foreground/50" />}
-              </p>
-            </div>
-          ))}
-        </div>
-      )}
     </div>
   );
 }
@@ -835,7 +917,9 @@ function MetricsConfigForm({ existing, onSaved, onCancel }: {
 
 // ─── Member Section (grouped view) ───────────────────────────────────────────
 
-function MemberSection({ userId, userName, byMonth, currentUserId, isSuperAdmin, onEdit, onDelete, title }: {
+function MemberSection({
+  userId, userName, byMonth, currentUserId, isSuperAdmin, onEdit, onDelete, title, open, onToggleOpen, websiteHealth,
+}: {
   userId: string;
   userName: string;
   byMonth: Map<string, Map<string, WeeklyReportRow[]>>;
@@ -844,9 +928,10 @@ function MemberSection({ userId, userName, byMonth, currentUserId, isSuperAdmin,
   onEdit: (r: WeeklyReportRow) => void;
   onDelete: (id: string) => void;
   title?: string;
+  open: boolean;
+  onToggleOpen: () => void;
+  websiteHealth: Record<string, { healthScore: number | null; healthIsPlaceholder: boolean }>;
 }) {
-  const [open, setOpen] = useState(true);
-
   const allRows = Array.from(byMonth.values()).flatMap((bw) => Array.from(bw.values()).flat());
   const grandTotal = sumRows(allRows);
   const websitesAssigned = new Set(allRows.map((r) => r.websiteId)).size;
@@ -855,12 +940,10 @@ function MemberSection({ userId, userName, byMonth, currentUserId, isSuperAdmin,
     <div className="rounded-xl border bg-card shadow-sm overflow-hidden">
       {/* Member header */}
       <button
-        onClick={() => setOpen((v) => !v)}
+        onClick={onToggleOpen}
         className="w-full flex items-center gap-3 px-4 py-3 bg-muted/40 hover:bg-muted/60 transition-colors border-b"
       >
-        <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10 text-xs font-bold uppercase shrink-0">
-          {userName[0]}
-        </div>
+        <AvatarChip name={userName} />
         <div className="flex-1 text-left min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <span className="font-semibold text-sm">{userName}</span>
@@ -888,6 +971,7 @@ function MemberSection({ userId, userName, byMonth, currentUserId, isSuperAdmin,
               isSuperAdmin={isSuperAdmin}
               onEdit={onEdit}
               onDelete={onDelete}
+              websiteHealth={websiteHealth}
             />
           ))}
         </div>
@@ -898,7 +982,7 @@ function MemberSection({ userId, userName, byMonth, currentUserId, isSuperAdmin,
 
 // ─── Month Section ────────────────────────────────────────────────────────────
 
-function MonthSection({ monthKey, byWeek, userId, currentUserId, isSuperAdmin, onEdit, onDelete }: {
+function MonthSection({ monthKey, byWeek, userId, currentUserId, isSuperAdmin, onEdit, onDelete, websiteHealth }: {
   monthKey: string;
   byWeek: Map<string, WeeklyReportRow[]>;
   userId: string;
@@ -906,6 +990,7 @@ function MonthSection({ monthKey, byWeek, userId, currentUserId, isSuperAdmin, o
   isSuperAdmin: boolean;
   onEdit: (r: WeeklyReportRow) => void;
   onDelete: (id: string) => void;
+  websiteHealth: Record<string, { healthScore: number | null; healthIsPlaceholder: boolean }>;
 }) {
   const [open, setOpen] = useState(true);
   const allRows = Array.from(byWeek.values()).flat();
@@ -936,6 +1021,7 @@ function MonthSection({ monthKey, byWeek, userId, currentUserId, isSuperAdmin, o
                 {COLS.map((c) => (
                   <th key={c} className="text-right px-4 py-2 font-medium text-muted-foreground text-xs">{c}</th>
                 ))}
+                <th className="text-left px-4 py-2 font-medium text-muted-foreground text-xs">Health Status</th>
                 {canModify && <th className="px-4 py-2 w-16" />}
               </tr>
             </thead>
@@ -944,13 +1030,26 @@ function MonthSection({ monthKey, byWeek, userId, currentUserId, isSuperAdmin, o
                 const weekTotal = sumRows(rows);
                 return (
                   <Fragment key={weekStart}>
-                    {rows.map((r) => (
+                    {rows.map((r) => {
+                      const health = websiteHealth[r.websiteId];
+                      const status = health?.healthScore != null ? websiteHealthStatus(health.healthScore) : null;
+                      return (
                       <tr key={r.id} className="hover:bg-muted/10 transition-colors group">
                         <td className="px-5 py-2 text-xs text-muted-foreground whitespace-nowrap">{formatWeekRange(weekStart)}</td>
                         <td className="px-4 py-2 font-medium text-xs">{r.websiteName}</td>
                         {COLS.map((c) => (
                           <td key={c} className="px-4 py-2 text-right tabular-nums text-xs">{getVal(r, c).toLocaleString()}</td>
                         ))}
+                        <td className="px-4 py-2">
+                          {status && (
+                            <Badge
+                              variant={HEALTH_STATUS_BADGE_VARIANT[status]}
+                              title={health?.healthIsPlaceholder ? "Placeholder — not backed by real data yet" : undefined}
+                            >
+                              {HEALTH_STATUS_LABEL[status]}
+                            </Badge>
+                          )}
+                        </td>
                         {canModify && (
                           <td className="px-4 py-2">
                             <div className="flex gap-1 justify-end">
@@ -964,7 +1063,8 @@ function MonthSection({ monthKey, byWeek, userId, currentUserId, isSuperAdmin, o
                           </td>
                         )}
                       </tr>
-                    ))}
+                      );
+                    })}
                     {/* Week total row */}
                     {rows.length > 1 && (
                       <tr className="bg-primary/5 border-t">
@@ -975,6 +1075,7 @@ function MonthSection({ monthKey, byWeek, userId, currentUserId, isSuperAdmin, o
                             {(weekTotal as Record<string, number>)[c.toLowerCase()].toLocaleString()}
                           </td>
                         ))}
+                        <td />
                         {canModify && <td />}
                       </tr>
                     )}
@@ -990,6 +1091,7 @@ function MonthSection({ monthKey, byWeek, userId, currentUserId, isSuperAdmin, o
                     {(monthTotal as Record<string, number>)[c.toLowerCase()].toLocaleString()}
                   </td>
                 ))}
+                <td />
                 {canModify && <td />}
               </tr>
             </tbody>

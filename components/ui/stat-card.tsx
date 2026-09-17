@@ -2,7 +2,7 @@ import type { ElementType, ReactNode } from "react";
 import { ArrowDown, ArrowUp, Minus } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-export type StatCardColor = "primary" | "emerald" | "amber" | "rose" | "orange";
+export type StatCardColor = "primary" | "emerald" | "amber" | "rose" | "orange" | "sky";
 
 const COLOR_CLASSES: Record<StatCardColor, string> = {
   primary: "bg-primary/10 text-primary",
@@ -10,6 +10,7 @@ const COLOR_CLASSES: Record<StatCardColor, string> = {
   amber:   "bg-amber-500/10 text-amber-600 dark:text-amber-400",
   rose:    "bg-rose-500/10 text-rose-600 dark:text-rose-400",
   orange:  "bg-orange-500/10 text-orange-600 dark:text-orange-400",
+  sky:     "bg-sky-500/10 text-sky-600 dark:text-sky-400",
 };
 
 const BREAKDOWN_TONE_CLASSES: Record<"primary" | "emerald" | "amber" | "rose" | "muted", string> = {
@@ -50,7 +51,7 @@ export function StatCard({
   color: StatCardColor;
   delta?: StatCardDelta;
   breakdown?: StatCardBreakdownItem[];
-  caption?: string;
+  caption?: ReactNode;
   /** Rendered right after the value, e.g. "/ 100". */
   valueSuffix?: string;
   /** Rendered at the end of the value row, e.g. a status Badge. */
