@@ -7,13 +7,26 @@ const SEGMENTS = [
   { key: "live", label: "Live & Verified", color: "#10b981" },
   { key: "pending", label: "Pending Crawler", color: "#f59e0b" },
   { key: "broken", label: "Broken / 404", color: "#f43f5e" },
+  { key: "other", label: "Unclassified", color: "#94a3b8" },
 ] as const;
 
-export function BacklinksDonut({ live, pending, broken }: { live: number; pending: number; broken: number }) {
-  const total = live + pending + broken;
-  const data = SEGMENTS.map((s) => ({
+export function BacklinksDonut({
+  total: totalProp,
+  live,
+  pending,
+  broken,
+}: {
+  total: number;
+  live: number;
+  pending: number;
+  broken: number;
+}) {
+  const other = Math.max(totalProp - (live + pending + broken), 0);
+  const total = totalProp;
+  const values: Record<(typeof SEGMENTS)[number]["key"], number> = { live, pending, broken, other };
+  const data = SEGMENTS.filter((s) => s.key !== "other" || other > 0).map((s) => ({
     ...s,
-    value: s.key === "live" ? live : s.key === "pending" ? pending : broken,
+    value: values[s.key],
   }));
 
   return (
