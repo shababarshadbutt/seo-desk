@@ -18,7 +18,7 @@ export function TabButton({
       type="button"
       onClick={onClick}
       className={cn(
-        "flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors",
+        "flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-medium transition-colors",
         active ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
       )}
     >

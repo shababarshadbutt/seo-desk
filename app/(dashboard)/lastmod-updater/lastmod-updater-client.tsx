@@ -312,7 +312,7 @@ export function LastmodUpdaterClient() {
   }
 
   return (
-    <div className="space-y-6 max-w-5xl">
+    <div className="space-y-6">
       {error && (
         <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
           {error}
@@ -337,7 +337,7 @@ export function LastmodUpdaterClient() {
         </CardHeader>
         <CardContent className="space-y-4 px-6 pb-6 pt-4">
 
-        <div className="flex rounded-lg border border-border p-1 bg-muted/40 w-fit">
+        <div className="flex gap-1.5 rounded-lg border border-border p-1 bg-muted/40 w-fit">
           <TabButton active={sourceTab === "sftp"} onClick={() => switchSourceTab("sftp")} icon={<Server className="h-4 w-4" />}>
             SFTP
           </TabButton>
@@ -419,7 +419,7 @@ export function LastmodUpdaterClient() {
           </div>
         ) : (
           <>
-            <div className="flex rounded-lg border border-border p-1 bg-muted/40 w-fit">
+            <div className="flex gap-1.5 rounded-lg border border-border p-1 bg-muted/40 w-fit">
               <TabButton active={scopeTab === "all"} onClick={() => switchScopeTab("all")}>All Files</TabButton>
               <TabButton active={scopeTab === "selected"} onClick={() => switchScopeTab("selected")}>Selected Files</TabButton>
               <TabButton active={scopeTab === "vertical"} onClick={() => switchScopeTab("vertical")}>Vertical wise</TabButton>

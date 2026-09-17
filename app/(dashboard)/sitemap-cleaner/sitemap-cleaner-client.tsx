@@ -273,7 +273,7 @@ export function SitemapCleanerClient() {
   }
 
   return (
-    <div className="space-y-6 max-w-5xl">
+    <div className="space-y-6">
       {error && (
         <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
           {error}
@@ -361,7 +361,7 @@ export function SitemapCleanerClient() {
         </CardHeader>
         <CardContent className="space-y-4 px-6 pb-6 pt-4">
 
-        <div className="flex flex-wrap rounded-lg border border-border p-1 bg-muted/40 w-fit">
+        <div className="flex flex-wrap gap-1.5 rounded-lg border border-border p-1 bg-muted/40 w-fit">
           <TabButton active={sourceTab === "upload"} onClick={() => switchSourceTab("upload")} icon={<Upload className="h-4 w-4" />}>
             Upload
           </TabButton>
@@ -485,7 +485,7 @@ export function SitemapCleanerClient() {
         </CardHeader>
         <CardContent className="space-y-4 px-6 pb-6 pt-4">
 
-        <div className="flex rounded-lg border border-border p-1 bg-muted/40 w-fit">
+        <div className="flex gap-1.5 rounded-lg border border-border p-1 bg-muted/40 w-fit">
           <TabButton active={outputTab === "zip"} onClick={() => setOutputTab("zip")} icon={<Download className="h-4 w-4" />}>
             Download ZIP
           </TabButton>

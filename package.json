@@ -8,7 +8,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "migrate": "tsx scripts/migrations/001-ui-revamp-new-collections.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1131.0",

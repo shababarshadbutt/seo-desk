@@ -110,9 +110,19 @@ GOOGLE_APPLICATION_CREDENTIALS=/absolute/path/to/service-account.json
 
 # Python
 PYTHON_EXECUTABLE=python3
+
+# Cron auth — required in prod (see .env.example for details)
+CRON_SECRET=
+
+# AWS credentials — only needed without an IAM role attached; see .env.example
+# AWS_ACCESS_KEY_ID=
+# AWS_SECRET_ACCESS_KEY=
+# AWS_REGION=us-east-1
 ```
 
 > ⚠️ Never commit `.env.local` or your `service-account.json` to version control. Both are listed in `.gitignore`.
+
+> S3 bucket/region and SFTP host/credentials are **not** environment variables — they're configured in the running app's Settings → Storage page and stored in MongoDB. See [docs/deploy/AWS-DEPLOYMENT.md](docs/deploy/AWS-DEPLOYMENT.md) for the full production deployment guide.
 
 ---
 
