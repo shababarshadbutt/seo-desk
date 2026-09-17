@@ -174,6 +174,7 @@ export function WeeklyReportsClient({ reports: initial, assignedWebsites, member
   // Filters for grouped view
   const [filterMember, setFilterMember] = useState("");
   const [filterMonth,  setFilterMonth]  = useState("");
+  const [filterWeek,   setFilterWeek]   = useState("");
 
   const isSuperAdmin = viewerRole === "super-admin";
   const canSubmit    = viewerRole !== "super-admin";
@@ -267,10 +268,17 @@ export function WeeklyReportsClient({ reports: initial, assignedWebsites, member
   // Unique months across all reports (for filter)
   const allMonths = Array.from(new Set(reports.map((r) => r.weekStart.slice(0, 7)))).sort().reverse();
 
+  // Unique week-starts across all reports, scoped to the selected month when
+  // one is chosen (for the Week Range filter).
+  const allWeeks = Array.from(new Set(
+    reports.filter((r) => !filterMonth || r.weekStart.slice(0, 7) === filterMonth).map((r) => r.weekStart)
+  )).sort().reverse();
+
   // Filter reports for grouped view
   const filteredReports = reports.filter((r) => {
     if (filterMember && r.userId !== filterMember) return false;
     if (filterMonth  && r.weekStart.slice(0, 7) !== filterMonth)  return false;
+    if (filterWeek   && r.weekStart !== filterWeek)  return false;
     return true;
   });
 
@@ -416,6 +424,11 @@ export function WeeklyReportsClient({ reports: initial, assignedWebsites, member
           <p className="text-sm text-muted-foreground mt-0.5">
             {isSuperAdmin ? `${reports.length} entries across all members` : "Track weekly website performance"}
           </p>
+          {showGrouped && (
+            <p className="text-sm text-muted-foreground mt-1 max-w-2xl">
+              Aggregate SEO delivery across members: total organic clicks, impressions, indexation footprint, and generated RFQs.
+            </p>
+          )}
         </div>
         <div className="flex gap-2 flex-wrap">
           {showGrouped && (
@@ -461,7 +474,7 @@ export function WeeklyReportsClient({ reports: initial, assignedWebsites, member
              now on the shared components/ui/stat-card.tsx StatCard (Part G) ── */}
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
         <StatCard
-          label="Total Organic Clicks" icon={MousePointerClick} color="primary"
+          label="Total Organic Clicks" icon={MousePointerClick} color="primary" accentBar
           value={statTotals.clicks}
           delta={trendDeltas ? { pct: trendDeltas.clicks } : undefined}
           caption={metricsConfig ? metricCaption(
@@ -470,7 +483,7 @@ export function WeeklyReportsClient({ reports: initial, assignedWebsites, member
           ) : undefined}
         />
         <StatCard
-          label="Total Impressions" icon={Eye} color="sky"
+          label="Total Impressions" icon={Eye} color="sky" accentBar
           value={statTotals.impressions}
           delta={trendDeltas ? { pct: trendDeltas.impressions } : undefined}
           caption={metricCaption(
@@ -479,13 +492,13 @@ export function WeeklyReportsClient({ reports: initial, assignedWebsites, member
           )}
         />
         <StatCard
-          label="Indexation Footprint" icon={CheckCircle2} color="emerald"
+          label="Indexation Footprint" icon={CheckCircle2} color="emerald" accentBar
           value={statTotals.indexation}
           delta={trendDeltas ? { pct: trendDeltas.indexation } : undefined}
           caption={metricsConfig ? metricCaption(`SERP Visibility Index ${metricsConfig.serpVisibilityIndex}`, metricsConfig.isPlaceholder) : undefined}
         />
         <StatCard
-          label="High-Value RFQs" icon={FileCheck2} color="amber"
+          label="High-Value RFQs" icon={FileCheck2} color="amber" accentBar
           value={statTotals.rfqs}
           delta={trendDeltas ? { pct: trendDeltas.rfqs } : undefined}
           caption={metricsConfig ? metricCaption(`Avg Value/Quote $${metricsConfig.avgValuePerQuote.toLocaleString()}`, metricsConfig.isPlaceholder) : undefined}
@@ -551,19 +564,28 @@ export function WeeklyReportsClient({ reports: initial, assignedWebsites, member
             <Label className="text-xs text-muted-foreground">Month</Label>
             <select
               value={filterMonth}
-              onChange={(e) => setFilterMonth(e.target.value)}
+              onChange={(e) => { setFilterMonth(e.target.value); setFilterWeek(""); }}
               className="h-9 rounded-lg border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
               <option value="">All months</option>
               {allMonths.map((mk) => <option key={mk} value={mk}>{monthLabel(mk)}</option>)}
             </select>
           </div>
-          {(filterMember || filterMonth) && (
-            <Button size="sm" variant="outline" onClick={() => { setFilterMember(""); setFilterMonth(""); }}>
-              <RotateCcw className="h-3.5 w-3.5" />
-              Reset Filters
-            </Button>
-          )}
+          <div className="space-y-1">
+            <Label className="text-xs text-muted-foreground">Week Range</Label>
+            <select
+              value={filterWeek}
+              onChange={(e) => setFilterWeek(e.target.value)}
+              className="h-9 rounded-lg border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <option value="">All weeks</option>
+              {allWeeks.map((ws) => <option key={ws} value={ws}>{formatWeekRange(ws)}</option>)}
+            </select>
+          </div>
+          <Button size="sm" variant="outline" onClick={() => { setFilterMember(""); setFilterMonth(""); setFilterWeek(""); }}>
+            <RotateCcw className="h-3.5 w-3.5" />
+            Reset Filters
+          </Button>
           {mostRecentUpdatedAt && (
             <p className="text-xs text-muted-foreground ml-auto">
               Updated {formatRelativeTime(mostRecentUpdatedAt)}

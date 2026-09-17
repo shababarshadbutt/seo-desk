@@ -13,6 +13,15 @@ const COLOR_CLASSES: Record<StatCardColor, string> = {
   sky:     "bg-sky-500/10 text-sky-600 dark:text-sky-400",
 };
 
+const ACCENT_BAR_CLASSES: Record<StatCardColor, string> = {
+  primary: "border-b-4 border-b-primary",
+  emerald: "border-b-4 border-b-emerald-500",
+  amber:   "border-b-4 border-b-amber-500",
+  rose:    "border-b-4 border-b-rose-500",
+  orange:  "border-b-4 border-b-orange-500",
+  sky:     "border-b-4 border-b-sky-500",
+};
+
 const BREAKDOWN_TONE_CLASSES: Record<"primary" | "emerald" | "amber" | "rose" | "muted", string> = {
   primary: "text-primary",
   emerald: "text-emerald-600 dark:text-emerald-400",
@@ -44,6 +53,7 @@ export function StatCard({
   valueSuffix,
   badge,
   loading,
+  accentBar,
 }: {
   icon: ElementType;
   label: string;
@@ -58,9 +68,11 @@ export function StatCard({
   badge?: ReactNode;
   /** Shows a skeleton in place of the value — for data that loads after first paint. */
   loading?: boolean;
+  /** Colors the card's bottom edge to match `color`, instead of the default uniform border. */
+  accentBar?: boolean;
 }) {
   return (
-    <div className="rounded-xl border border-border bg-card p-4 space-y-2">
+    <div className={cn("rounded-xl border border-border bg-card p-4 space-y-2", accentBar && ACCENT_BAR_CLASSES[color])}>
       <div className="flex items-center justify-between gap-2">
         <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">{label}</p>
         <div className={cn("rounded-lg p-1.5 shrink-0", COLOR_CLASSES[color])}>
