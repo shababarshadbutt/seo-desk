@@ -1,11 +1,13 @@
 import { unlink, stat } from "fs/promises";
 
-// Pattern extraction and index rewriting in this feature stream directly from
-// SFTP/S3/live URLs rather than downloading whole sitemap files to disk
-// first (that's what keeps it safe at 100M+ URLs — see lib/lastmod/sampling.ts).
-// The only local footprint a run creates is the small sitemap-index.xml it
-// downloads/builds/rewrites. This registry tracks those paths per run so the
-// UI can report how much space they used and delete them on confirmation.
+// Pattern extraction stays fully streamed straight from SFTP/S3/live URLs,
+// never touching local disk (that's what keeps it safe at 100M+ URLs — see
+// lib/lastmod/sampling.ts). Rewriting does need a local footprint though: the
+// small sitemap-index.xml it downloads/builds/rewrites, plus a temp copy of
+// each leaf sitemap file it rewrites (lib/lastmod/leafRewrite.ts) — still
+// streamed chunk by chunk rather than buffered in memory, just no longer
+// disk-free. This registry tracks those paths per run so the UI can report
+// how much space they used and delete them on confirmation.
 const registry = new Map<string, Set<string>>();
 
 export function trackLocalPath(runId: string, path: string): void {

@@ -8,8 +8,28 @@ import { connectDB, Settings, LastmodDomainCache } from "@/lib/mongodb";
 import { downloadSftpFile, uploadSftpFile } from "@/lib/lastmod/sftpClient";
 import { downloadS3Object, uploadS3File, s3KeyForDomainFile } from "@/lib/lastmod/s3Client";
 import { rewriteIndexLastmod } from "@/lib/lastmod/indexRewrite";
+import { rewriteLeafLastmodFile } from "@/lib/lastmod/leafRewrite";
+import { isGzipFilename } from "@/lib/lastmod/xmlStream";
 import { trackLocalPath, totalTrackedBytes } from "@/lib/lastmod/localCleanup";
-import type { LastmodSource } from "@/lib/mongodb";
+import type { ILastmodFile, LastmodSource } from "@/lib/mongodb";
+
+const LEAF_REWRITE_CONCURRENCY = 5;
+
+// Bounded-concurrency worker pool — same shape as the `someLimit` helper in
+// lib/lastmod/indexDetect.ts, but runs every item to completion instead of
+// stopping at the first match. `fn` must never throw: a per-file failure is
+// caught and logged by the caller so one bad leaf file can't abort the rest
+// of the run.
+async function runWithConcurrency<T>(items: T[], limit: number, fn: (item: T) => Promise<void>): Promise<void> {
+  let nextIndex = 0;
+  async function worker() {
+    while (nextIndex < items.length) {
+      const item = items[nextIndex++];
+      await fn(item);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+}
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
@@ -123,6 +143,65 @@ export async function POST(req: Request) {
           await uploadSftpFile(sftpConfig, localIndexPath, indexFile.loc);
         }
 
+        // The index step above only bumps the index's own <sitemap><lastmod>
+        // pointer entries. Each leaf file's own <url><lastmod> entries still
+        // need to be downloaded, rewritten, and re-uploaded individually.
+        const leafFilenames = Array.from(scopeFilenames).filter((name) => name !== cache.indexFilename);
+        const leafFiles = leafFilenames
+          .map((name) => cache.files.find((f) => f.filename === name))
+          .filter((f): f is ILastmodFile => !!f);
+
+        log(`[INFO] Rewriting <lastmod> inside ${leafFiles.length} leaf sitemap file(s) ...`);
+
+        let leafFilesTouched = 0;
+        let leafUrlsRewritten = 0;
+        const leafFailures: string[] = [];
+
+        await runWithConcurrency(leafFiles, LEAF_REWRITE_CONCURRENCY, async (file) => {
+          const localInPath = join(tempDir, `in-${file.filename}`);
+          const localOutPath = join(tempDir, `out-${file.filename}`);
+          const isGzip = isGzipFilename(file.filename);
+
+          try {
+            if (source === "sftp") {
+              await downloadSftpFile(sftpConfig, file.loc, localInPath);
+            } else if (source === "s3") {
+              await downloadS3Object(s3Config, file.loc, localInPath);
+            } else {
+              const res = await fetch(file.loc);
+              if (!res.ok) throw new Error(`Failed to fetch ${file.loc}: HTTP ${res.status}`);
+              await writeFile(localInPath, Buffer.from(await res.arrayBuffer()));
+            }
+            trackLocalPath(runId, localInPath);
+
+            const rewrittenCount = await rewriteLeafLastmodFile({
+              inputPath: localInPath,
+              outputPath: localOutPath,
+              isGzip,
+              newDate: date,
+            });
+            trackLocalPath(runId, localOutPath);
+
+            const leafKey = s3KeyForDomainFile(s3Config, domain, file.filename);
+            await uploadS3File(s3Config, localOutPath, leafKey, isGzip ? "application/gzip" : "application/xml");
+            if (source === "sftp") {
+              await uploadSftpFile(sftpConfig, localOutPath, file.loc);
+            }
+
+            leafFilesTouched += 1;
+            leafUrlsRewritten += rewrittenCount;
+            log(`[INFO] Updated ${file.filename} — ${rewrittenCount} <lastmod> entr${rewrittenCount === 1 ? "y" : "ies"}.`);
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            leafFailures.push(file.filename);
+            log(`[ERROR] ${file.filename}: ${message}`);
+          }
+        });
+
+        log(
+          `[INFO] Leaf rewrite complete: ${leafFilesTouched}/${leafFiles.length} file(s) updated, ${leafUrlsRewritten} <lastmod> entr${leafUrlsRewritten === 1 ? "y" : "ies"} changed${leafFailures.length ? `, ${leafFailures.length} failed` : ""}.`
+        );
+
         const localBytesUsed = await totalTrackedBytes(runId);
         log(`[DONE] Update complete. Local temp usage: ${(localBytesUsed / 1024).toFixed(1)} KB.`);
 
@@ -131,6 +210,9 @@ export async function POST(req: Request) {
           exitCode: 0,
           runId,
           changedCount,
+          leafFilesTouched,
+          leafUrlsRewritten,
+          leafFailures,
           localBytesUsed,
           s3Key,
         });
