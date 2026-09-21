@@ -135,6 +135,7 @@ export async function POST(req: Request) {
           log(`[INFO] Fetching ${cacheFiles.length} sitemap file(s) via ${source}...`);
           const sftpConfig = settings!.sftpConfig;
           const s3Config = settings!.s3Config;
+          let fetchedCount = 0;
 
           items = await mapLimit(cacheFiles, FETCH_CONCURRENCY, async (file): Promise<CleanItem> => {
             const isGzip = isGzipFilename(file.filename);
@@ -158,8 +159,16 @@ export async function POST(req: Request) {
               if (!fileStream) return { name: file.filename, urls: [], isIndex: file.isIndex };
               const result = await streamSitemapEntries(fileStream);
               return { name: file.filename, urls: result.entries.map((e) => e.loc), isIndex: file.isIndex };
-            } catch {
+            } catch (err) {
+              const message = err instanceof Error ? err.message : String(err);
+              log(`[WARN] Failed to fetch ${file.filename}: ${message}`);
               return { name: file.filename, urls: [], isIndex: file.isIndex };
+            } finally {
+              // Keeps the SSE connection flowing during long bulk downloads — a
+              // long silent gap here can otherwise be mistaken for a dead
+              // connection by an idle-timeout proxy sitting in front of this route.
+              fetchedCount++;
+              log(`[INFO] Fetched ${fetchedCount}/${cacheFiles.length} sitemap(s)...`);
             }
           });
           log(`[INFO] Fetched ${items.length} sitemap(s)`);
