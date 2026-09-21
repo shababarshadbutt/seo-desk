@@ -33,6 +33,11 @@ function filenameFromUrl(url: string): string {
   }
 }
 
+// Tracks *why* the most recent fetchWithTimeout call returned null/non-ok —
+// swallowed entirely before this, which made a WAF/CDN block (403/challenge),
+// a DNS/network failure, and a 20s timeout all look identical to the caller.
+let lastFetchDiagnostic = "";
+
 async function fetchWithTimeout(url: string): Promise<Response | null> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
@@ -42,8 +47,14 @@ async function fetchWithTimeout(url: string): Promise<Response | null> {
       redirect: "follow",
       headers: { "User-Agent": USER_AGENT, Accept: "application/xml,text/xml,*/*" },
     });
+    lastFetchDiagnostic = res.ok ? "" : `HTTP ${res.status}`;
     return res;
-  } catch {
+  } catch (err) {
+    lastFetchDiagnostic = controller.signal.aborted
+      ? `timed out after ${REQUEST_TIMEOUT_MS}ms`
+      : err instanceof Error
+        ? err.message
+        : String(err);
     return null;
   } finally {
     clearTimeout(timer);
@@ -63,8 +74,9 @@ async function openSitemapBody(url: string): Promise<Readable | null> {
   return maybeGunzip(nodeStream, isGzip);
 }
 
-export async function discoverRobotsSitemaps(siteUrl: string): Promise<string[]> {
+export async function discoverRobotsSitemaps(siteUrl: string): Promise<{ urls: string[]; attempts: string[] }> {
   const origin = normalizeOrigin(siteUrl);
+  const attempts: string[] = [];
   const robots = await fetchWithTimeout(`${origin}/robots.txt`);
   const sitemapUrls: string[] = [];
 
@@ -74,6 +86,9 @@ export async function discoverRobotsSitemaps(siteUrl: string): Promise<string[]>
       const match = line.match(/^\s*sitemap\s*:\s*(\S+)/i);
       if (match) sitemapUrls.push(match[1]);
     }
+    if (sitemapUrls.length === 0) attempts.push(`${origin}/robots.txt: reachable but no "Sitemap:" line found`);
+  } else {
+    attempts.push(`${origin}/robots.txt: ${lastFetchDiagnostic || "unreachable"}`);
   }
 
   if (sitemapUrls.length === 0) {
@@ -84,10 +99,11 @@ export async function discoverRobotsSitemaps(siteUrl: string): Promise<string[]>
         sitemapUrls.push(url);
         break;
       }
+      attempts.push(`${url}: ${lastFetchDiagnostic || "unreachable"}`);
     }
   }
 
-  return sitemapUrls;
+  return { urls: sitemapUrls, attempts };
 }
 
 async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
@@ -109,10 +125,11 @@ async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promis
 // entries here — peekRootElement reads only the opening tag, so a file with
 // 100M <url> children costs one HTTP request and a few bytes, not a full scan.
 export async function discoverSitemapFiles(siteUrl: string): Promise<DiscoveryResult> {
-  const roots = await discoverRobotsSitemaps(siteUrl);
+  const { urls: roots, attempts } = await discoverRobotsSitemaps(siteUrl);
   if (roots.length === 0) {
+    const detail = attempts.length > 0 ? ` Details: ${attempts.join("; ")}` : "";
     throw new Error(
-      "No sitemap could be discovered — checked robots.txt for Sitemap: entries and fell back to /sitemap.xml and /sitemap_index.xml with no luck."
+      `No sitemap could be discovered — checked robots.txt for Sitemap: entries and fell back to /sitemap.xml and /sitemap_index.xml with no luck.${detail}`
     );
   }
 
