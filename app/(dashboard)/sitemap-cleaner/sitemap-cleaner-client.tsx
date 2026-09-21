@@ -1,7 +1,7 @@
 "use client";
 
-import { useRef, useState } from "react";
-import { Upload, Server, Cloud, Link as LinkIcon, RefreshCw, Download } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Upload, Server, Cloud, Link as LinkIcon, RefreshCw, Download, ChevronDown, Search, X as XIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -66,6 +66,9 @@ export function SitemapCleanerClient() {
   const [domains, setDomains] = useState<string[]>([]);
   const [selectedDomain, setSelectedDomain] = useState("");
   const [loadingDomains, setLoadingDomains] = useState(false);
+  const [domainDropdownOpen, setDomainDropdownOpen] = useState(false);
+  const [domainSearch, setDomainSearch] = useState("");
+  const domainDropdownRef = useRef<HTMLDivElement>(null);
 
   // URL source
   const [siteUrl, setSiteUrl] = useState("");
@@ -76,6 +79,8 @@ export function SitemapCleanerClient() {
   const [fetchedFileCount, setFetchedFileCount] = useState(0);
   const [fetchedIndexFilename, setFetchedIndexFilename] = useState<string | null>(null);
   const [fetchedFiles, setFetchedFiles] = useState<FetchedFile[]>([]);
+  const [downloadingRaw, setDownloadingRaw] = useState(false);
+  const [rawDownloadPath, setRawDownloadPath] = useState<string | null>(null);
 
   // Run state
   const [status, setStatus] = useState<RunStatus>("idle");
@@ -84,6 +89,25 @@ export function SitemapCleanerClient() {
   const [s3Keys, setS3Keys] = useState<string[] | null>(null);
 
   const domain = sourceTab === "upload" ? uploadDomain.trim() : sourceTab === "url" ? deriveDomainFromUrl(siteUrl) : selectedDomain;
+
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (domainDropdownRef.current && !domainDropdownRef.current.contains(e.target as Node)) {
+        setDomainDropdownOpen(false);
+      }
+    }
+    if (domainDropdownOpen) document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [domainDropdownOpen]);
+
+  const filteredDomains = domains.filter((d) => d.toLowerCase().includes(domainSearch.toLowerCase()));
+
+  function selectDomain(d: string) {
+    setSelectedDomain(d);
+    resetFetchState();
+    setDomainDropdownOpen(false);
+    setDomainSearch("");
+  }
 
   function resetRunState() {
     setStatus("idle");
@@ -98,6 +122,7 @@ export function SitemapCleanerClient() {
     setFetchedFileCount(0);
     setFetchedIndexFilename(null);
     setFetchedFiles([]);
+    setRawDownloadPath(null);
   }
 
   async function loadDomains(source: "sftp" | "s3") {
@@ -158,6 +183,25 @@ export function SitemapCleanerClient() {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setFetchingFiles(false);
+    }
+  }
+
+  async function downloadRawSitemaps() {
+    if (sourceTab === "upload" || !hasFetched) return;
+    setError(null);
+    setDownloadingRaw(true);
+    try {
+      const res = await fetch("/api/sitemap-cleaner/download-raw", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ source: sourceTab, domain }),
+      });
+      const data = await readJson(res);
+      setRawDownloadPath(data.downloadFilePath);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setDownloadingRaw(false);
     }
   }
 
@@ -394,22 +438,75 @@ export function SitemapCleanerClient() {
 
         {(sourceTab === "sftp" || sourceTab === "s3") && (
           <div className="space-y-2">
-            <Label htmlFor="domain-select">Domain</Label>
-            <select
-              id="domain-select"
-              className="flex h-10 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm disabled:opacity-50"
-              value={selectedDomain}
-              onChange={(e) => {
-                setSelectedDomain(e.target.value);
-                resetFetchState();
-              }}
-              disabled={loadingDomains || domains.length === 0}
-            >
-              <option value="">{loadingDomains ? "Loading domains…" : "Select a domain…"}</option>
-              {domains.map((d) => (
-                <option key={d} value={d}>{d}</option>
-              ))}
-            </select>
+            <Label id="domain-select-label" htmlFor="domain-select">Domain</Label>
+            <div ref={domainDropdownRef} className="relative">
+              <button
+                type="button"
+                id="domain-select"
+                aria-haspopup="listbox"
+                aria-expanded={domainDropdownOpen}
+                aria-labelledby="domain-select-label"
+                onClick={() => {
+                  if (loadingDomains || domains.length === 0) return;
+                  setDomainDropdownOpen((v) => !v);
+                  setDomainSearch("");
+                }}
+                disabled={loadingDomains || domains.length === 0}
+                className={cn(
+                  "flex h-10 w-full items-center justify-between rounded-lg border border-input bg-background px-3 py-2 text-sm disabled:opacity-50",
+                  !selectedDomain && "text-muted-foreground"
+                )}
+              >
+                <span className="truncate">
+                  {selectedDomain || (loadingDomains ? "Loading domains…" : "Select a domain…")}
+                </span>
+                <ChevronDown className={cn("h-4 w-4 shrink-0 ml-2 text-muted-foreground transition-transform", domainDropdownOpen && "rotate-180")} />
+              </button>
+
+              {domainDropdownOpen && (
+                <div className="absolute z-50 top-full left-0 mt-1 w-full rounded-lg border border-border bg-card shadow-lg overflow-hidden">
+                  <div className="p-2 border-b border-border">
+                    <div className="relative">
+                      <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                      <input
+                        autoFocus
+                        type="text"
+                        placeholder="Search domains…"
+                        value={domainSearch}
+                        onChange={(e) => setDomainSearch(e.target.value)}
+                        className="w-full h-8 pl-8 pr-3 rounded-lg border border-input bg-background text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      />
+                      {domainSearch && (
+                        <button type="button" onClick={() => setDomainSearch("")} className="absolute right-2 top-1/2 -translate-y-1/2">
+                          <XIcon className="h-3.5 w-3.5 text-muted-foreground hover:text-foreground" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  <div role="listbox" className="max-h-52 overflow-y-auto py-1">
+                    {filteredDomains.length === 0 ? (
+                      <p className="text-xs text-muted-foreground text-center py-4">No domains found</p>
+                    ) : (
+                      filteredDomains.map((d) => (
+                        <button
+                          key={d}
+                          type="button"
+                          role="option"
+                          aria-selected={selectedDomain === d}
+                          onClick={() => selectDomain(d)}
+                          className={cn(
+                            "w-full flex items-center px-3 py-2 text-sm hover:bg-muted/50 transition-colors text-left truncate",
+                            selectedDomain === d && "bg-primary/5 text-primary font-medium"
+                          )}
+                        >
+                          {d}
+                        </button>
+                      ))
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         )}
 
@@ -467,6 +564,22 @@ export function SitemapCleanerClient() {
                     </table>
                   </div>
                 )}
+                <div className="flex flex-wrap items-center gap-3">
+                  <Button variant="outline" onClick={downloadRawSitemaps} disabled={downloadingRaw}>
+                    <Download className={cn("h-4 w-4 mr-2", downloadingRaw && "animate-pulse")} />
+                    {downloadingRaw ? "Preparing…" : "Download Raw Sitemaps"}
+                  </Button>
+                  {rawDownloadPath && (
+                    <a
+                      href={`/api/logs/download?path=${encodeURIComponent(rawDownloadPath)}`}
+                      download
+                      className="inline-flex items-center gap-2 text-sm font-medium text-primary hover:underline"
+                    >
+                      <Download className="h-4 w-4" />
+                      Download original (uncleaned) sitemaps ZIP
+                    </a>
+                  )}
+                </div>
               </>
             )}
           </>
