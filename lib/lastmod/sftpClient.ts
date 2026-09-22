@@ -58,6 +58,7 @@ function joinRemote(...parts: string[]): string {
 
 const CONNECT_TIMEOUT_MS = 30_000;
 const OPERATION_TIMEOUT_MS = 120_000;
+const DISCONNECT_TIMEOUT_MS = 5_000;
 
 function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -67,6 +68,18 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
       (e) => { clearTimeout(timer); reject(e); }
     );
   });
+}
+
+// A wedged socket can make client.end() hang indefinitely — bound it and fall
+// back to destroying the raw ssh2 socket so a large batch of sequential
+// per-file sessions (thousands, at scale) can't leak file descriptors.
+async function endWithFallback(client: SftpClient): Promise<void> {
+  try {
+    await withTimeout(client.end(), DISCONNECT_TIMEOUT_MS, "disconnect");
+  } catch {
+    const raw = (client as unknown as { client?: { destroy?: () => void } }).client;
+    raw?.destroy?.();
+  }
 }
 
 function connectOptions(cfg: ISftpConfig): SftpClient.ConnectOptions {
@@ -88,7 +101,7 @@ async function withSftp<T>(cfg: ISftpConfig, fn: (client: SftpClient) => Promise
     await withTimeout(client.connect(connectOptions(cfg)), CONNECT_TIMEOUT_MS, "connect");
     return await withTimeout(fn(client), OPERATION_TIMEOUT_MS, "operation");
   } finally {
-    try { await client.end(); } catch { /* connection already dead — nothing to clean up */ }
+    await endWithFallback(client);
     release();
   }
 }
@@ -129,7 +142,7 @@ export async function openSftpReadStream(
   await withTimeout(client.connect(connectOptions(cfg)), CONNECT_TIMEOUT_MS, "connect");
   const stream = client.createReadStream(remotePath);
   const close = async () => {
-    try { await client.end(); } catch { /* connection already dead — nothing to clean up */ }
+    await endWithFallback(client);
     release();
   };
   return { stream, close };

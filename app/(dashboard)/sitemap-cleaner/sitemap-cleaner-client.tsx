@@ -81,6 +81,7 @@ export function SitemapCleanerClient() {
   const [fetchedFiles, setFetchedFiles] = useState<FetchedFile[]>([]);
   const [downloadingRaw, setDownloadingRaw] = useState(false);
   const [rawDownloadPath, setRawDownloadPath] = useState<string | null>(null);
+  const [rawDownloadProgress, setRawDownloadProgress] = useState<string | null>(null);
 
   // Run state
   const [status, setStatus] = useState<RunStatus>("idle");
@@ -123,6 +124,7 @@ export function SitemapCleanerClient() {
     setFetchedIndexFilename(null);
     setFetchedFiles([]);
     setRawDownloadPath(null);
+    setRawDownloadProgress(null);
   }
 
   async function loadDomains(source: "sftp" | "s3") {
@@ -189,6 +191,8 @@ export function SitemapCleanerClient() {
   async function downloadRawSitemaps() {
     if (sourceTab === "upload" || !hasFetched) return;
     setError(null);
+    setRawDownloadPath(null);
+    setRawDownloadProgress("Starting…");
     setDownloadingRaw(true);
     try {
       const res = await fetch("/api/sitemap-cleaner/download-raw", {
@@ -196,10 +200,40 @@ export function SitemapCleanerClient() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ source: sourceTab, domain }),
       });
-      const data = await readJson(res);
-      setRawDownloadPath(data.downloadFilePath);
+
+      if (!res.ok || !res.body) {
+        const text = await res.text().catch(() => "Unknown error");
+        throw new Error(text || `Request failed (${res.status})`);
+      }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let doneEvt: { exitCode?: number; error?: string; downloadFilePath?: string } | null = null;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const parts = buffer.split("\n\n");
+        buffer = parts.pop() ?? "";
+        for (const part of parts) {
+          const raw = part.replace(/^data:\s*/, "").trim();
+          if (!raw) continue;
+          const evt = JSON.parse(raw);
+          if (evt.type === "output") setRawDownloadProgress(evt.line);
+          if (evt.type === "done") doneEvt = evt;
+        }
+      }
+
+      if (!doneEvt || doneEvt.exitCode !== 0 || !doneEvt.downloadFilePath) {
+        throw new Error(doneEvt?.error || "Raw sitemap download failed.");
+      }
+      setRawDownloadPath(doneEvt.downloadFilePath);
+      setRawDownloadProgress(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
+      setRawDownloadProgress(null);
     } finally {
       setDownloadingRaw(false);
     }
@@ -569,6 +603,9 @@ export function SitemapCleanerClient() {
                     <Download className={cn("h-4 w-4 mr-2", downloadingRaw && "animate-pulse")} />
                     {downloadingRaw ? "Preparing…" : "Download Raw Sitemaps"}
                   </Button>
+                  {downloadingRaw && rawDownloadProgress && (
+                    <p className="text-sm text-muted-foreground">{rawDownloadProgress}</p>
+                  )}
                   {rawDownloadPath && (
                     <a
                       href={`/api/logs/download?path=${encodeURIComponent(rawDownloadPath)}`}
@@ -599,9 +636,30 @@ export function SitemapCleanerClient() {
         <CardContent className="space-y-4 px-6 pb-6 pt-4">
 
         <div className="flex gap-1.5 rounded-lg border border-border p-1 bg-muted/40 w-fit">
-          <TabButton active={outputTab === "zip"} onClick={() => setOutputTab("zip")} icon={<Download className="h-4 w-4" />}>
-            Download ZIP
-          </TabButton>
+          {outputTab === "zip" && status === "success" && outputFilePath ? (
+            <a
+              href={`/api/logs/download?path=${encodeURIComponent(outputFilePath)}`}
+              download
+              className="flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow-sm transition-colors hover:bg-primary/90"
+            >
+              <Download className="h-4 w-4" />
+              Download ZIP
+            </a>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setOutputTab("zip")}
+              className={cn(
+                "flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-medium transition-colors",
+                outputTab === "zip"
+                  ? "bg-muted text-muted-foreground"
+                  : "text-muted-foreground hover:text-foreground"
+              )}
+            >
+              <Download className="h-4 w-4" />
+              Download ZIP
+            </button>
+          )}
           <TabButton active={outputTab === "s3"} onClick={() => setOutputTab("s3")} icon={<Cloud className="h-4 w-4" />}>
             Push to S3
           </TabButton>
@@ -613,14 +671,14 @@ export function SitemapCleanerClient() {
 
         {status !== "idle" && <TerminalOutput lines={lines} status={status} />}
 
-        {status === "success" && outputFilePath && (
+        {status === "success" && outputFilePath && outputTab === "s3" && (
           <a
             href={`/api/logs/download?path=${encodeURIComponent(outputFilePath)}`}
             download
             className="inline-flex items-center gap-2 text-sm font-medium text-primary hover:underline"
           >
             <Download className="h-4 w-4" />
-            Download {outputTab === "s3" ? "duplicates report" : "cleaned sitemaps ZIP"}
+            Download duplicates report
           </a>
         )}
 

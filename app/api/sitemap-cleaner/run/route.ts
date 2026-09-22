@@ -20,17 +20,40 @@ export const maxDuration = 300;
 
 type CleanerSource = "upload" | LastmodSource;
 
+// A single stalled file (out of a batch that can run into the thousands)
+// must not hang the whole run — cap each file's fetch at this ceiling and
+// treat a timeout the same as any other per-file failure.
+const PER_FILE_TIMEOUT_MS = 120_000;
+
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+    promise.then(
+      (v) => { clearTimeout(timer); resolve(v); },
+      (e) => { clearTimeout(timer); reject(e); }
+    );
+  });
+}
+
 function sseEvent(data: object): Uint8Array {
   return new TextEncoder().encode(`data: ${JSON.stringify(data)}\n\n`);
 }
 
-async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+async function mapLimit<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T) => Promise<R>,
+  onSettle?: (completed: number, total: number) => void
+): Promise<R[]> {
   const results: R[] = new Array(items.length);
   let nextIndex = 0;
+  let completed = 0;
   async function worker() {
     while (nextIndex < items.length) {
       const i = nextIndex++;
       results[i] = await fn(items[i]);
+      completed++;
+      onSettle?.(completed, items.length);
     }
   }
   await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
@@ -136,32 +159,49 @@ export async function POST(req: Request) {
           const sftpConfig = settings!.sftpConfig;
           const s3Config = settings!.s3Config;
 
-          items = await mapLimit(cacheFiles, FETCH_CONCURRENCY, async (file): Promise<CleanItem> => {
-            const isGzip = isGzipFilename(file.filename);
-            try {
-              if (source === "sftp") {
-                const { stream: fileStream, close } = await openSftpReadStream(sftpConfig, file.loc);
-                try {
+          // Only log roughly ~20 progress lines total regardless of batch size —
+          // enough to show a large (thousands-of-files) run is still moving,
+          // without flooding the terminal output with one line per file.
+          const progressEvery = Math.max(1, Math.round(cacheFiles.length / 20));
+
+          items = await mapLimit(
+            cacheFiles,
+            FETCH_CONCURRENCY,
+            async (file): Promise<CleanItem> => {
+              const isGzip = isGzipFilename(file.filename);
+              const fetchOne = async (): Promise<CleanItem> => {
+                if (source === "sftp") {
+                  const { stream: fileStream, close } = await openSftpReadStream(sftpConfig, file.loc);
+                  try {
+                    const result = await streamSitemapEntries(maybeGunzip(fileStream, isGzip));
+                    return { name: file.filename, urls: result.entries.map((e) => e.loc), isIndex: file.isIndex };
+                  } finally {
+                    await close();
+                  }
+                }
+                if (source === "s3") {
+                  const fileStream = await openS3ReadStream(s3Config, file.loc);
                   const result = await streamSitemapEntries(maybeGunzip(fileStream, isGzip));
                   return { name: file.filename, urls: result.entries.map((e) => e.loc), isIndex: file.isIndex };
-                } finally {
-                  await close();
                 }
-              }
-              if (source === "s3") {
-                const fileStream = await openS3ReadStream(s3Config, file.loc);
-                const result = await streamSitemapEntries(maybeGunzip(fileStream, isGzip));
+                // source === "url"
+                const fileStream = await openSitemapBody(file.loc);
+                if (!fileStream) return { name: file.filename, urls: [], isIndex: file.isIndex };
+                const result = await streamSitemapEntries(fileStream);
                 return { name: file.filename, urls: result.entries.map((e) => e.loc), isIndex: file.isIndex };
+              };
+              try {
+                return await withTimeout(fetchOne(), PER_FILE_TIMEOUT_MS, `Fetching ${file.filename}`);
+              } catch {
+                return { name: file.filename, urls: [], isIndex: file.isIndex };
               }
-              // source === "url"
-              const fileStream = await openSitemapBody(file.loc);
-              if (!fileStream) return { name: file.filename, urls: [], isIndex: file.isIndex };
-              const result = await streamSitemapEntries(fileStream);
-              return { name: file.filename, urls: result.entries.map((e) => e.loc), isIndex: file.isIndex };
-            } catch {
-              return { name: file.filename, urls: [], isIndex: file.isIndex };
+            },
+            (completed, total) => {
+              if (completed % progressEvery === 0 || completed === total) {
+                log(`[INFO] Fetched ${completed}/${total} sitemap file(s)...`);
+              }
             }
-          });
+          );
           log(`[INFO] Fetched ${items.length} sitemap(s)`);
         }
 
@@ -190,7 +230,9 @@ export async function POST(req: Request) {
           const zipPath = join(outDir, `sitemap-cleaner-${runId}.zip`);
 
           await new Promise<void>((resolvePromise, reject) => {
-            const archive = archiver("zip", { zlib: { level: 6 } });
+            // level 0 (STORE) — sitemaps are already small XML/text, and at a few
+            // thousand files, skipping deflate work cuts the zip-build time drastically.
+            const archive = archiver("zip", { zlib: { level: 0 } });
             const out = createWriteStream(zipPath);
             out.on("close", () => resolvePromise());
             archive.on("error", reject);
