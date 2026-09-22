@@ -24,11 +24,7 @@ export function resolveWorkerCount(fileCount: number): number {
   return Math.max(1, Math.min(scaled, os.cpus().length));
 }
 
-// Returns null (rather than throwing) if the pool itself can't be
-// constructed, so a caller can fall back to in-process parsing entirely
-// instead of losing the whole run to an environment that can't spawn
-// worker_threads at all (seen in some restricted/constrained containers).
-export function createParsePool(fileCount: number): Piscina | null {
+function tryCreatePool(fileCount: number): Piscina | null {
   try {
     return new Piscina({
       filename: workerFilePath(),
@@ -43,26 +39,60 @@ export function createParsePool(fileCount: number): Piscina | null {
 }
 
 const WORKER_TASK_TIMEOUT_MS = 15_000;
+// If the pool fails/hangs this many times in a row, stop trying it for the
+// rest of the run — an environment where worker_threads can't actually spawn
+// (seen in some restricted/constrained containers) would otherwise make
+// every single file pay the full timeout before falling back, and that
+// compounding delay is exactly what trips a reverse proxy's idle timeout
+// (e.g. nginx's default 60s proxy_read_timeout) even though each individual
+// file does eventually complete.
+const FAILURE_THRESHOLD = 3;
 
-// Parses via the worker pool, but never lets a stuck/unavailable pool stall
-// the caller indefinitely — a hung or crashed worker (or a pool that failed
-// to construct at all) falls back to parsing in-process instead. This is
-// what keeps one slow file from turning into a multi-minute silent gap that
-// an idle-timeout proxy in front of the app would otherwise kill the whole
-// SSE connection over.
-export async function parseWithFallback(pool: Piscina | null, input: ParseSitemapInput): Promise<SitemapStreamResult> {
-  if (pool) {
-    try {
-      return await new Promise<SitemapStreamResult>((resolvePromise, reject) => {
-        const timer = setTimeout(() => reject(new Error("worker parse timed out")), WORKER_TASK_TIMEOUT_MS);
-        pool.run(input).then(
-          (v) => { clearTimeout(timer); resolvePromise(v); },
-          (e) => { clearTimeout(timer); reject(e); }
-        );
-      });
-    } catch {
-      // Fall through to in-process parsing below.
+export interface SitemapParser {
+  parse(input: ParseSitemapInput): Promise<SitemapStreamResult>;
+  destroy(): Promise<void>;
+}
+
+// A stateful wrapper around the worker pool for a single run. Parses via the
+// pool but never lets a stuck/unavailable worker stall the caller
+// indefinitely — a hung or crashed task (or a pool that failed to construct
+// at all) falls back to parsing in-process. After a few consecutive
+// failures it stops trying the pool altogether for the remainder of this
+// run, since a pool that's reliably failing will fail the same way on every
+// subsequent file too.
+export function createSitemapParser(fileCount: number, onPoolAbandoned?: () => void): SitemapParser {
+  let pool: Piscina | null = tryCreatePool(fileCount);
+  let consecutiveFailures = 0;
+
+  async function parse(input: ParseSitemapInput): Promise<SitemapStreamResult> {
+    if (pool) {
+      const activePool = pool;
+      try {
+        const result = await new Promise<SitemapStreamResult>((resolvePromise, reject) => {
+          const timer = setTimeout(() => reject(new Error("worker parse timed out")), WORKER_TASK_TIMEOUT_MS);
+          activePool.run(input).then(
+            (v) => { clearTimeout(timer); resolvePromise(v); },
+            (e) => { clearTimeout(timer); reject(e); }
+          );
+        });
+        consecutiveFailures = 0;
+        return result;
+      } catch {
+        consecutiveFailures++;
+        if (consecutiveFailures >= FAILURE_THRESHOLD && pool === activePool) {
+          pool = null;
+          activePool.destroy().catch(() => {});
+          onPoolAbandoned?.();
+        }
+        // Fall through to in-process parsing below.
+      }
     }
+    return parseSitemapBuffer(input);
   }
-  return parseSitemapBuffer(input);
+
+  async function destroy(): Promise<void> {
+    if (pool) await pool.destroy().catch(() => {});
+  }
+
+  return { parse, destroy };
 }

@@ -16,9 +16,8 @@ import { isGzipFilename, type SitemapStreamResult } from "@/lib/lastmod/xmlStrea
 import { detectIndexFile } from "@/lib/lastmod/indexDetect";
 import { cleanSitemaps, parseDomainHost, type CleanItem } from "@/lib/sitemapCleaner/clean";
 import { buildUrlsetXml, buildSitemapIndexXml } from "@/lib/sitemapCleaner/xmlBuild";
-import { createParsePool, parseWithFallback } from "@/lib/sitemapCleaner/workerPool";
+import { createSitemapParser, type SitemapParser } from "@/lib/sitemapCleaner/workerPool";
 import type { ParseSitemapInput } from "@/lib/sitemapCleaner/parseWorker";
-import type { Piscina } from "piscina";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -156,7 +155,7 @@ export async function POST(req: Request) {
   // must stay in tmpdir() so /api/logs/download can serve it afterward.
   const batchFilesToClean: string[] = [];
 
-  let pool: Piscina | null = null;
+  let parser: SitemapParser | null = null;
 
   const stream = new ReadableStream({
     async start(controller) {
@@ -197,9 +196,13 @@ export async function POST(req: Request) {
           // the thousands, can otherwise monopolize the main thread long enough
           // to delay the SSE progress pings below and look like a dead
           // connection to an idle-timeout proxy. Piscina fans that work out
-          // across worker threads, scaled to this run's file count.
-          pool = createParsePool(cacheFiles.length);
-          if (!pool) log("[WARN] Worker pool unavailable in this environment — parsing in-process.");
+          // across worker threads, scaled to this run's file count — but
+          // falls back to (and, after repeated failures, stays on) in-process
+          // parsing if the pool can't actually run tasks in this environment.
+          parser = createSitemapParser(cacheFiles.length, () => {
+            log("[WARN] Worker pool repeatedly unresponsive — parsing remaining files in-process.");
+          });
+          const activeParser = parser;
 
           items = await mapLimit(cacheFiles, FETCH_CONCURRENCY, async (file): Promise<CleanItem> => {
             const isGzip = isGzipFilename(file.filename);
@@ -222,7 +225,7 @@ export async function POST(req: Request) {
                 raw = await streamToBuffer(fileStream);
               }
               const parseInput: ParseSitemapInput = { buffer: raw, isGzip };
-              const result: SitemapStreamResult = await parseWithFallback(pool, parseInput);
+              const result: SitemapStreamResult = await activeParser.parse(parseInput);
               return { name: file.filename, urls: result.entries.map((e) => e.loc), isIndex: file.isIndex };
             };
 
@@ -330,7 +333,7 @@ export async function POST(req: Request) {
         // Pool cleanup must never be able to prevent the stream from closing
         // — an unhandled rejection here would otherwise leave the SSE
         // response hanging instead of ending it.
-        if (pool) await pool.destroy().catch(() => {});
+        if (parser) await parser.destroy().catch(() => {});
         controller.close();
         await Promise.allSettled(batchFilesToClean.map((p) => unlink(p)));
       }
