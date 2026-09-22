@@ -11,8 +11,22 @@ import type { Readable } from "stream";
 import type { IS3Config } from "@/lib/mongodb";
 import { assertSafeDomain } from "./sftpClient";
 
+// Reused across calls (keyed by region) so the AWS SDK's own memoized
+// credential-provider-chain resolution actually gets to do its job — a fresh
+// S3Client per call re-resolves credentials from scratch every time, which
+// under load (hundreds of files) can throttle/fail against IMDS or other
+// rate-limited credential sources ("Could not load credentials from any
+// providers") even though the same credentials would resolve fine once.
+const clientCache = new Map<string, S3Client>();
+
 function client(cfg: IS3Config): S3Client {
-  return new S3Client({ region: cfg.region || "us-east-1" });
+  const region = cfg.region || "us-east-1";
+  let s3 = clientCache.get(region);
+  if (!s3) {
+    s3 = new S3Client({ region });
+    clientCache.set(region, s3);
+  }
+  return s3;
 }
 
 function prefixTemplate(cfg: IS3Config): string {

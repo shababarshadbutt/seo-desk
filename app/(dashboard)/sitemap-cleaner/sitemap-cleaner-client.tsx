@@ -216,8 +216,8 @@ export function SitemapCleanerClient() {
     setS3Keys(null);
     setError(null);
 
+    let sessionId: string | undefined;
     try {
-      let sessionId: string | undefined;
       if (sourceTab === "upload") {
         const uploadResult = await runUploadFlow();
         if (!uploadResult) {
@@ -227,48 +227,69 @@ export function SitemapCleanerClient() {
         }
         sessionId = uploadResult.sessionId;
       }
-
-      const res = await fetch("/api/sitemap-cleaner/run", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ source: sourceTab, domain, subfolder, output: outputTab, sessionId }),
-      });
-
-      if (!res.ok || !res.body) {
-        const text = await res.text().catch(() => "Unknown error");
-        setLines((p) => [...p, `[ERROR] ${text}`]);
-        setStatus("error");
-        return;
-      }
-
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-      let exitCode = -1;
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const parts = buffer.split("\n\n");
-        buffer = parts.pop() ?? "";
-        for (const part of parts) {
-          const raw = part.replace(/^data:\s*/, "").trim();
-          if (!raw) continue;
-          const evt = JSON.parse(raw);
-          if (evt.type === "output") setLines((p) => [...p, evt.line]);
-          if (evt.type === "done") {
-            exitCode = evt.exitCode ?? -1;
-            if (evt.outputFilePath) setOutputFilePath(evt.outputFilePath);
-            if (evt.s3Keys) setS3Keys(evt.s3Keys);
-          }
-        }
-      }
-
-      setStatus(exitCode === 0 ? "success" : "error");
     } catch (err) {
       setStatus("error");
       setLines((p) => [...p, `[ERROR] ${err instanceof Error ? err.message : String(err)}`]);
+      return;
+    }
+
+    // Re-fetching from S3/SFTP/URL is idempotent, so a run that dies mid-stream
+    // (a dropped connection, not a validation/server error) is worth retrying
+    // automatically instead of losing the whole run to one network blip. An
+    // upload session's server-side temp files are deleted after one attempt,
+    // so that source only gets a single try.
+    const maxAttempts = sourceTab === "upload" ? 1 : 3;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        const res = await fetch("/api/sitemap-cleaner/run", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ source: sourceTab, domain, subfolder, output: outputTab, sessionId }),
+        });
+
+        if (!res.ok || !res.body) {
+          const text = await res.text().catch(() => "Unknown error");
+          setLines((p) => [...p, `[ERROR] ${text}`]);
+          setStatus("error");
+          return;
+        }
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        let exitCode = -1;
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const parts = buffer.split("\n\n");
+          buffer = parts.pop() ?? "";
+          for (const part of parts) {
+            const raw = part.replace(/^data:\s*/, "").trim();
+            if (!raw) continue;
+            const evt = JSON.parse(raw);
+            if (evt.type === "output") setLines((p) => [...p, evt.line]);
+            if (evt.type === "done") {
+              exitCode = evt.exitCode ?? -1;
+              if (evt.outputFilePath) setOutputFilePath(evt.outputFilePath);
+              if (evt.s3Keys) setS3Keys(evt.s3Keys);
+            }
+          }
+        }
+
+        setStatus(exitCode === 0 ? "success" : "error");
+        return;
+      } catch (err) {
+        if (attempt >= maxAttempts) {
+          setStatus("error");
+          setLines((p) => [...p, `[ERROR] ${err instanceof Error ? err.message : String(err)}`]);
+          return;
+        }
+        setLines((p) => [...p, `[WARN] Connection lost, retrying (${attempt}/${maxAttempts - 1})...`]);
+        await new Promise((r) => setTimeout(r, 1000 * attempt));
+      }
     }
   }
 

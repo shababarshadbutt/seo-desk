@@ -13,6 +13,7 @@ import { Label } from "@/components/ui/label";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { useFunctionalityStub, FunctionalityStubToast } from "@/components/functionality-stub";
 import { randomLoginFakeStats, type LoginFakeStats } from "@/lib/login-fake-stats";
+import packageJson from "@/package.json";
 
 function GoogleIcon({ className }: { className?: string }) {
   return (
@@ -74,7 +75,7 @@ export default function LoginPage() {
             DATA. INSIGHTS. GROWTH.
           </span>
           <span className="inline-flex items-center rounded-full border border-border bg-muted/50 px-2 py-0.5 text-[11px] font-medium text-muted-foreground" title="Real — matches the app version shown throughout the dashboard">
-            v1.0.0 Enterprise
+            v{packageJson.version} Enterprise
           </span>
         </div>
         <div className="flex items-center gap-3 flex-wrap">
