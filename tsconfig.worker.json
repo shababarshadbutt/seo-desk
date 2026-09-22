@@ -1,0 +1,15 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "lib": ["ES2020"],
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "types": ["node"],
+    "rootDir": "lib",
+    "outDir": "dist-workers"
+  },
+  "include": ["lib/sitemapCleaner/parseWorker.ts", "lib/lastmod/xmlStream.ts"]
+}

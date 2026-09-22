@@ -1,4 +1,5 @@
 import { LastmodUpdaterClient } from "./lastmod-updater-client";
+import packageJson from "@/package.json";
 
 export default function LastmodUpdaterPage() {
   return (
@@ -7,7 +8,7 @@ export default function LastmodUpdaterPage() {
         <div className="flex items-center gap-2.5">
           <h2 className="text-2xl font-bold">Lastmod Updater</h2>
           <span className="inline-flex items-center rounded-full border border-border bg-muted/50 px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
-            v1.0.0 Engine
+            v{packageJson.version} Engine
           </span>
         </div>
         <p className="text-sm text-muted-foreground mt-1">

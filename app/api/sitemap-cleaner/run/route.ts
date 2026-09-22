@@ -3,17 +3,22 @@ import { createWriteStream } from "fs";
 import { tmpdir } from "os";
 import { join, resolve } from "path";
 import { randomUUID } from "crypto";
+import { buffer as streamToBuffer } from "stream/consumers";
 import archiver from "archiver";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { connectDB, Settings, LastmodDomainCache } from "@/lib/mongodb";
 import type { LastmodSource } from "@/lib/mongodb";
-import { openSftpReadStream } from "@/lib/lastmod/sftpClient";
-import { openS3ReadStream, uploadS3Buffer, s3KeyForDomainFile } from "@/lib/lastmod/s3Client";
+import { openSftpReadStream, listSftpSitemapFiles } from "@/lib/lastmod/sftpClient";
+import { openS3ReadStream, uploadS3Buffer, s3KeyForDomainFile, listS3SitemapObjects } from "@/lib/lastmod/s3Client";
 import { openSitemapBody } from "@/lib/lastmod/liveUrlDiscovery";
-import { streamSitemapEntries, maybeGunzip, isGzipFilename } from "@/lib/lastmod/xmlStream";
+import { isGzipFilename, type SitemapStreamResult } from "@/lib/lastmod/xmlStream";
+import { detectIndexFile } from "@/lib/lastmod/indexDetect";
 import { cleanSitemaps, parseDomainHost, type CleanItem } from "@/lib/sitemapCleaner/clean";
 import { buildUrlsetXml, buildSitemapIndexXml } from "@/lib/sitemapCleaner/xmlBuild";
+import { createParsePool } from "@/lib/sitemapCleaner/workerPool";
+import type { ParseSitemapInput } from "@/lib/sitemapCleaner/parseWorker";
+import type { Piscina } from "piscina";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -21,15 +26,15 @@ export const maxDuration = 300;
 type CleanerSource = "upload" | LastmodSource;
 
 // A single stalled file (out of a batch that can run into the thousands)
-// must not hang the whole run — cap each file's fetch at this ceiling and
-// treat a timeout the same as any other per-file failure.
+// must not hang the whole run — cap each file's fetch+parse at this ceiling
+// and treat a timeout the same as any other per-file failure.
 const PER_FILE_TIMEOUT_MS = 120_000;
 
 function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
-  return new Promise((resolve, reject) => {
+  return new Promise((resolvePromise, reject) => {
     const timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
     promise.then(
-      (v) => { clearTimeout(timer); resolve(v); },
+      (v) => { clearTimeout(timer); resolvePromise(v); },
       (e) => { clearTimeout(timer); reject(e); }
     );
   });
@@ -39,21 +44,13 @@ function sseEvent(data: object): Uint8Array {
   return new TextEncoder().encode(`data: ${JSON.stringify(data)}\n\n`);
 }
 
-async function mapLimit<T, R>(
-  items: T[],
-  limit: number,
-  fn: (item: T) => Promise<R>,
-  onSettle?: (completed: number, total: number) => void
-): Promise<R[]> {
+async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
   const results: R[] = new Array(items.length);
   let nextIndex = 0;
-  let completed = 0;
   async function worker() {
     while (nextIndex < items.length) {
       const i = nextIndex++;
       results[i] = await fn(items[i]);
-      completed++;
-      onSettle?.(completed, items.length);
     }
   }
   await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
@@ -111,6 +108,7 @@ export async function POST(req: Request) {
   }
 
   let cacheFiles: { filename: string; loc: string; isIndex: boolean }[] = [];
+  let cacheStaleNotice: string | null = null;
   if (source !== "upload") {
     const cache = await LastmodDomainCache.findOne({ domain, source });
     if (!cache || cache.files.length === 0) {
@@ -120,6 +118,37 @@ export async function POST(req: Request) {
       );
     }
     cacheFiles = cache.files;
+
+    // The cached list is only refreshed when "Fetch Files" is clicked — if the
+    // bucket/remote directory has grown or shrunk since then, re-listing here
+    // (cheap compared to the fetch+parse pass below) keeps a run from silently
+    // operating on a stale, smaller file count.
+    if (source === "s3" || source === "sftp") {
+      const liveFiles =
+        source === "s3"
+          ? await listS3SitemapObjects(settings!.s3Config, domain)
+          : await listSftpSitemapFiles(settings!.sftpConfig, domain);
+
+      const cachedKeys = new Set(cacheFiles.map((f) => f.loc));
+      const liveKeys = new Set(liveFiles.map((f) => f.loc));
+      const changed =
+        cachedKeys.size !== liveKeys.size || liveFiles.some((f) => !cachedKeys.has(f.loc));
+
+      if (changed && liveFiles.length > 0) {
+        const { indexFilename, files: annotatedFiles } = await detectIndexFile(
+          source,
+          liveFiles.map((f) => ({ ...f, isIndex: false })),
+          source === "sftp" ? settings!.sftpConfig : null,
+          source === "s3" ? settings!.s3Config : null
+        );
+        await LastmodDomainCache.findOneAndUpdate(
+          { domain, source },
+          { $set: { files: annotatedFiles, indexFilename, fetchedAt: new Date() } }
+        );
+        cacheStaleNotice = `[INFO] Domain file list changed since last fetch — refreshed (${cacheFiles.length} → ${annotatedFiles.length} files)`;
+        cacheFiles = annotatedFiles;
+      }
+    }
   }
 
   const runId = randomUUID();
@@ -127,12 +156,16 @@ export async function POST(req: Request) {
   // must stay in tmpdir() so /api/logs/download can serve it afterward.
   const batchFilesToClean: string[] = [];
 
+  let pool: Piscina | null = null;
+
   const stream = new ReadableStream({
     async start(controller) {
       const enqueue = (data: object) => controller.enqueue(sseEvent(data));
       const log = (line: string) => enqueue({ type: "output", line });
 
       try {
+        if (cacheStaleNotice) log(cacheStaleNotice);
+
         // ── Resolve every file's [{name, urls, isIndex}] regardless of source ──
         let items: CleanItem[];
 
@@ -158,50 +191,55 @@ export async function POST(req: Request) {
           log(`[INFO] Fetching ${cacheFiles.length} sitemap file(s) via ${source}...`);
           const sftpConfig = settings!.sftpConfig;
           const s3Config = settings!.s3Config;
+          let fetchedCount = 0;
 
-          // Only log roughly ~20 progress lines total regardless of batch size —
-          // enough to show a large (thousands-of-files) run is still moving,
-          // without flooding the terminal output with one line per file.
-          const progressEvery = Math.max(1, Math.round(cacheFiles.length / 20));
+          // Parsing (gunzip + XML streaming) is CPU-bound and, for a batch in
+          // the thousands, can otherwise monopolize the main thread long enough
+          // to delay the SSE progress pings below and look like a dead
+          // connection to an idle-timeout proxy. Piscina fans that work out
+          // across worker threads, scaled to this run's file count.
+          pool = createParsePool(cacheFiles.length);
+          const parsePool = pool;
 
-          items = await mapLimit(
-            cacheFiles,
-            FETCH_CONCURRENCY,
-            async (file): Promise<CleanItem> => {
-              const isGzip = isGzipFilename(file.filename);
-              const fetchOne = async (): Promise<CleanItem> => {
-                if (source === "sftp") {
-                  const { stream: fileStream, close } = await openSftpReadStream(sftpConfig, file.loc);
-                  try {
-                    const result = await streamSitemapEntries(maybeGunzip(fileStream, isGzip));
-                    return { name: file.filename, urls: result.entries.map((e) => e.loc), isIndex: file.isIndex };
-                  } finally {
-                    await close();
-                  }
+          items = await mapLimit(cacheFiles, FETCH_CONCURRENCY, async (file): Promise<CleanItem> => {
+            const isGzip = isGzipFilename(file.filename);
+            const fetchAndParse = async (): Promise<CleanItem> => {
+              let raw: Buffer;
+              if (source === "sftp") {
+                const { stream: fileStream, close } = await openSftpReadStream(sftpConfig, file.loc);
+                try {
+                  raw = await streamToBuffer(fileStream);
+                } finally {
+                  await close();
                 }
-                if (source === "s3") {
-                  const fileStream = await openS3ReadStream(s3Config, file.loc);
-                  const result = await streamSitemapEntries(maybeGunzip(fileStream, isGzip));
-                  return { name: file.filename, urls: result.entries.map((e) => e.loc), isIndex: file.isIndex };
-                }
+              } else if (source === "s3") {
+                const fileStream = await openS3ReadStream(s3Config, file.loc);
+                raw = await streamToBuffer(fileStream);
+              } else {
                 // source === "url"
                 const fileStream = await openSitemapBody(file.loc);
                 if (!fileStream) return { name: file.filename, urls: [], isIndex: file.isIndex };
-                const result = await streamSitemapEntries(fileStream);
-                return { name: file.filename, urls: result.entries.map((e) => e.loc), isIndex: file.isIndex };
-              };
-              try {
-                return await withTimeout(fetchOne(), PER_FILE_TIMEOUT_MS, `Fetching ${file.filename}`);
-              } catch {
-                return { name: file.filename, urls: [], isIndex: file.isIndex };
+                raw = await streamToBuffer(fileStream);
               }
-            },
-            (completed, total) => {
-              if (completed % progressEvery === 0 || completed === total) {
-                log(`[INFO] Fetched ${completed}/${total} sitemap file(s)...`);
-              }
+              const parseInput: ParseSitemapInput = { buffer: raw, isGzip };
+              const result: SitemapStreamResult = await parsePool.run(parseInput);
+              return { name: file.filename, urls: result.entries.map((e) => e.loc), isIndex: file.isIndex };
+            };
+
+            try {
+              return await withTimeout(fetchAndParse(), PER_FILE_TIMEOUT_MS, `Fetching ${file.filename}`);
+            } catch (err) {
+              const message = err instanceof Error ? err.message : String(err);
+              log(`[WARN] Failed to fetch ${file.filename}: ${message}`);
+              return { name: file.filename, urls: [], isIndex: file.isIndex };
+            } finally {
+              // Keeps the SSE connection flowing during long bulk downloads — a
+              // long silent gap here can otherwise be mistaken for a dead
+              // connection by an idle-timeout proxy sitting in front of this route.
+              fetchedCount++;
+              log(`[INFO] Fetched ${fetchedCount}/${cacheFiles.length} sitemap(s)...`);
             }
-          );
+          });
           log(`[INFO] Fetched ${items.length} sitemap(s)`);
         }
 
@@ -230,9 +268,7 @@ export async function POST(req: Request) {
           const zipPath = join(outDir, `sitemap-cleaner-${runId}.zip`);
 
           await new Promise<void>((resolvePromise, reject) => {
-            // level 0 (STORE) — sitemaps are already small XML/text, and at a few
-            // thousand files, skipping deflate work cuts the zip-build time drastically.
-            const archive = archiver("zip", { zlib: { level: 0 } });
+            const archive = archiver("zip", { zlib: { level: 6 } });
             const out = createWriteStream(zipPath);
             out.on("close", () => resolvePromise());
             archive.on("error", reject);
@@ -291,6 +327,7 @@ export async function POST(req: Request) {
         log(`[ERROR] ${message}`);
         enqueue({ type: "done", exitCode: -1, runId, error: message });
       } finally {
+        if (pool) await pool.destroy();
         controller.close();
         await Promise.allSettled(batchFilesToClean.map((p) => unlink(p)));
       }
