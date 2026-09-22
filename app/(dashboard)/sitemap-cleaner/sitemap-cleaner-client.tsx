@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { StepBadge } from "@/components/ui/step-badge";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 import { TabButton } from "@/components/tab-button";
 import { TerminalOutput, type RunStatus } from "@/components/terminal-output";
 import { cn } from "@/lib/utils";
@@ -414,24 +415,21 @@ export function SitemapCleanerClient() {
         )}
 
         {(sourceTab === "sftp" || sourceTab === "s3") && (
-          <div className="space-y-2">
-            <Label htmlFor="domain-select">Domain</Label>
-            <select
-              id="domain-select"
-              className="flex h-10 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm disabled:opacity-50"
-              value={selectedDomain}
-              onChange={(e) => {
-                setSelectedDomain(e.target.value);
-                resetFetchState();
-              }}
-              disabled={loadingDomains || domains.length === 0}
-            >
-              <option value="">{loadingDomains ? "Loading domains…" : "Select a domain…"}</option>
-              {domains.map((d) => (
-                <option key={d} value={d}>{d}</option>
-              ))}
-            </select>
-          </div>
+          <SearchableSelect
+            id="domain-select"
+            label="Domain"
+            value={selectedDomain}
+            onChange={(d) => {
+              setSelectedDomain(d);
+              resetFetchState();
+            }}
+            options={domains}
+            loading={loadingDomains}
+            placeholder="Select a domain…"
+            loadingPlaceholder="Loading domains…"
+            emptyMessage="No domains found"
+            searchPlaceholder="Search domains…"
+          />
         )}
 
         {sourceTab === "url" && (
