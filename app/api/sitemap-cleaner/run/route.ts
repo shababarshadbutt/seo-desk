@@ -18,6 +18,7 @@ import { cleanSitemaps, parseDomainHost, type CleanItem } from "@/lib/sitemapCle
 import { buildUrlsetXml, buildSitemapIndexXml } from "@/lib/sitemapCleaner/xmlBuild";
 import { createSitemapParser, type SitemapParser } from "@/lib/sitemapCleaner/workerPool";
 import type { ParseSitemapInput } from "@/lib/sitemapCleaner/parseWorker";
+import packageJson from "@/package.json";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -163,6 +164,10 @@ export async function POST(req: Request) {
       const log = (line: string) => enqueue({ type: "output", line });
 
       try {
+        // Printed on every run so a stale/cached deploy is never ambiguous —
+        // unlike the sidebar badge, this line is generated live by the
+        // actual server process handling this request.
+        log(`[INFO] Sitemap Cleaner engine v${packageJson.version}`);
         if (cacheStaleNotice) log(cacheStaleNotice);
 
         // ── Resolve every file's [{name, urls, isIndex}] regardless of source ──
@@ -204,45 +209,58 @@ export async function POST(req: Request) {
           });
           const activeParser = parser;
 
-          items = await mapLimit(cacheFiles, FETCH_CONCURRENCY, async (file): Promise<CleanItem> => {
-            const isGzip = isGzipFilename(file.filename);
-            const fetchAndParse = async (): Promise<CleanItem> => {
-              let raw: Buffer;
-              if (source === "sftp") {
-                const { stream: fileStream, close } = await openSftpReadStream(sftpConfig, file.loc);
-                try {
-                  raw = await streamToBuffer(fileStream);
-                } finally {
-                  await close();
-                }
-              } else if (source === "s3") {
-                const fileStream = await openS3ReadStream(s3Config, file.loc);
-                raw = await streamToBuffer(fileStream);
-              } else {
-                // source === "url"
-                const fileStream = await openSitemapBody(file.loc);
-                if (!fileStream) return { name: file.filename, urls: [], isIndex: file.isIndex };
-                raw = await streamToBuffer(fileStream);
-              }
-              const parseInput: ParseSitemapInput = { buffer: raw, isGzip };
-              const result: SitemapStreamResult = await activeParser.parse(parseInput);
-              return { name: file.filename, urls: result.entries.map((e) => e.loc), isIndex: file.isIndex };
-            };
+          // Independent of any per-file progress line — a single slow file
+          // (a huge sitemap, a GC pause, anything) shouldn't be able to
+          // create a gap long enough to trip a reverse proxy's idle-read
+          // timeout (commonly 60s) just because it happens to land between
+          // two per-file log lines.
+          const heartbeat = setInterval(() => {
+            log(`[INFO] Still working... (${fetchedCount}/${cacheFiles.length} fetched so far)`);
+          }, 20_000);
 
-            try {
-              return await withTimeout(fetchAndParse(), PER_FILE_TIMEOUT_MS, `Fetching ${file.filename}`);
-            } catch (err) {
-              const message = err instanceof Error ? err.message : String(err);
-              log(`[WARN] Failed to fetch ${file.filename}: ${message}`);
-              return { name: file.filename, urls: [], isIndex: file.isIndex };
-            } finally {
-              // Keeps the SSE connection flowing during long bulk downloads — a
-              // long silent gap here can otherwise be mistaken for a dead
-              // connection by an idle-timeout proxy sitting in front of this route.
-              fetchedCount++;
-              log(`[INFO] Fetched ${fetchedCount}/${cacheFiles.length} sitemap(s)...`);
-            }
-          });
+          try {
+            items = await mapLimit(cacheFiles, FETCH_CONCURRENCY, async (file): Promise<CleanItem> => {
+              const isGzip = isGzipFilename(file.filename);
+              const fetchAndParse = async (): Promise<CleanItem> => {
+                let raw: Buffer;
+                if (source === "sftp") {
+                  const { stream: fileStream, close } = await openSftpReadStream(sftpConfig, file.loc);
+                  try {
+                    raw = await streamToBuffer(fileStream);
+                  } finally {
+                    await close();
+                  }
+                } else if (source === "s3") {
+                  const fileStream = await openS3ReadStream(s3Config, file.loc);
+                  raw = await streamToBuffer(fileStream);
+                } else {
+                  // source === "url"
+                  const fileStream = await openSitemapBody(file.loc);
+                  if (!fileStream) return { name: file.filename, urls: [], isIndex: file.isIndex };
+                  raw = await streamToBuffer(fileStream);
+                }
+                const parseInput: ParseSitemapInput = { buffer: raw, isGzip };
+                const result: SitemapStreamResult = await activeParser.parse(parseInput);
+                return { name: file.filename, urls: result.entries.map((e) => e.loc), isIndex: file.isIndex };
+              };
+
+              try {
+                return await withTimeout(fetchAndParse(), PER_FILE_TIMEOUT_MS, `Fetching ${file.filename}`);
+              } catch (err) {
+                const message = err instanceof Error ? err.message : String(err);
+                log(`[WARN] Failed to fetch ${file.filename}: ${message}`);
+                return { name: file.filename, urls: [], isIndex: file.isIndex };
+              } finally {
+                // Keeps the SSE connection flowing during long bulk downloads — a
+                // long silent gap here can otherwise be mistaken for a dead
+                // connection by an idle-timeout proxy sitting in front of this route.
+                fetchedCount++;
+                log(`[INFO] Fetched ${fetchedCount}/${cacheFiles.length} sitemap(s)...`);
+              }
+            });
+          } finally {
+            clearInterval(heartbeat);
+          }
           log(`[INFO] Fetched ${items.length} sitemap(s)`);
         }
 
