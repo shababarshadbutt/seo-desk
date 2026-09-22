@@ -16,7 +16,7 @@ import { isGzipFilename, type SitemapStreamResult } from "@/lib/lastmod/xmlStrea
 import { detectIndexFile } from "@/lib/lastmod/indexDetect";
 import { cleanSitemaps, parseDomainHost, type CleanItem } from "@/lib/sitemapCleaner/clean";
 import { buildUrlsetXml, buildSitemapIndexXml } from "@/lib/sitemapCleaner/xmlBuild";
-import { createParsePool } from "@/lib/sitemapCleaner/workerPool";
+import { createParsePool, parseWithFallback } from "@/lib/sitemapCleaner/workerPool";
 import type { ParseSitemapInput } from "@/lib/sitemapCleaner/parseWorker";
 import type { Piscina } from "piscina";
 
@@ -199,7 +199,7 @@ export async function POST(req: Request) {
           // connection to an idle-timeout proxy. Piscina fans that work out
           // across worker threads, scaled to this run's file count.
           pool = createParsePool(cacheFiles.length);
-          const parsePool = pool;
+          if (!pool) log("[WARN] Worker pool unavailable in this environment — parsing in-process.");
 
           items = await mapLimit(cacheFiles, FETCH_CONCURRENCY, async (file): Promise<CleanItem> => {
             const isGzip = isGzipFilename(file.filename);
@@ -222,7 +222,7 @@ export async function POST(req: Request) {
                 raw = await streamToBuffer(fileStream);
               }
               const parseInput: ParseSitemapInput = { buffer: raw, isGzip };
-              const result: SitemapStreamResult = await parsePool.run(parseInput);
+              const result: SitemapStreamResult = await parseWithFallback(pool, parseInput);
               return { name: file.filename, urls: result.entries.map((e) => e.loc), isIndex: file.isIndex };
             };
 
@@ -327,7 +327,10 @@ export async function POST(req: Request) {
         log(`[ERROR] ${message}`);
         enqueue({ type: "done", exitCode: -1, runId, error: message });
       } finally {
-        if (pool) await pool.destroy();
+        // Pool cleanup must never be able to prevent the stream from closing
+        // — an unhandled rejection here would otherwise leave the SSE
+        // response hanging instead of ending it.
+        if (pool) await pool.destroy().catch(() => {});
         controller.close();
         await Promise.allSettled(batchFilesToClean.map((p) => unlink(p)));
       }
