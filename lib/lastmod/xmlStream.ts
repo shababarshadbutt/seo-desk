@@ -12,6 +12,11 @@ export function maybeGunzip(stream: Readable, isGzip: boolean): Readable {
   if (!isGzip) return stream;
   const gunzip = createGunzip();
   stream.on("error", (err) => gunzip.destroy(err));
+  // .pipe() only forwards source errors downstream (above) — it does not
+  // propagate a destroy() of the returned stream back upstream, so without
+  // this the underlying fetch/S3/SFTP read would keep running even after a
+  // caller gives up on the decompressed output.
+  gunzip.on("close", () => stream.destroy());
   stream.pipe(gunzip);
   return gunzip;
 }

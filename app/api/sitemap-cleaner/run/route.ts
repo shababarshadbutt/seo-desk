@@ -30,9 +30,12 @@ type CleanerSource = "upload" | LastmodSource;
 // and treat a timeout the same as any other per-file failure.
 const PER_FILE_TIMEOUT_MS = 120_000;
 
-function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string, onTimeout?: () => void): Promise<T> {
   return new Promise((resolvePromise, reject) => {
-    const timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+    const timer = setTimeout(() => {
+      onTimeout?.();
+      reject(new Error(`${label} timed out after ${ms}ms`));
+    }, ms);
     promise.then(
       (v) => { clearTimeout(timer); resolvePromise(v); },
       (e) => { clearTimeout(timer); reject(e); }
@@ -221,10 +224,21 @@ export async function POST(req: Request) {
           try {
             items = await mapLimit(cacheFiles, FETCH_CONCURRENCY, async (file): Promise<CleanItem> => {
             const isGzip = isGzipFilename(file.filename);
+            // Lets a per-file timeout below actually stop the underlying
+            // fetch/read instead of abandoning it. Without this, a timed-out
+            // file's stream kept buffering to completion in the background,
+            // uncounted against FETCH_CONCURRENCY — on a large run that's
+            // what was driving the process past its heap limit.
+            const controller = new AbortController();
             const fetchAndParse = async (): Promise<CleanItem> => {
               let raw: Buffer;
               if (source === "sftp") {
                 const { stream: fileStream, close } = await openSftpReadStream(sftpConfig, file.loc);
+                controller.signal.addEventListener(
+                  "abort",
+                  () => fileStream.destroy(new Error("aborted: per-file timeout")),
+                  { once: true }
+                );
                 try {
                   raw = await streamToBuffer(fileStream);
                 } finally {
@@ -232,11 +246,21 @@ export async function POST(req: Request) {
                 }
               } else if (source === "s3") {
                 const fileStream = await openS3ReadStream(s3Config, file.loc);
+                controller.signal.addEventListener(
+                  "abort",
+                  () => fileStream.destroy(new Error("aborted: per-file timeout")),
+                  { once: true }
+                );
                 raw = await streamToBuffer(fileStream);
               } else {
                 // source === "url"
                 const fileStream = await openSitemapBody(file.loc);
                 if (!fileStream) return { name: file.filename, urls: [], isIndex: file.isIndex };
+                controller.signal.addEventListener(
+                  "abort",
+                  () => fileStream.destroy(new Error("aborted: per-file timeout")),
+                  { once: true }
+                );
                 raw = await streamToBuffer(fileStream);
               }
               const parseInput: ParseSitemapInput = { buffer: raw, isGzip };
@@ -245,7 +269,12 @@ export async function POST(req: Request) {
             };
 
             try {
-              return await withTimeout(fetchAndParse(), PER_FILE_TIMEOUT_MS, `Fetching ${file.filename}`);
+              return await withTimeout(
+                fetchAndParse(),
+                PER_FILE_TIMEOUT_MS,
+                `Fetching ${file.filename}`,
+                () => controller.abort()
+              );
             } catch (err) {
               const message = err instanceof Error ? err.message : String(err);
               log(`[WARN] Failed to fetch ${file.filename}: ${message}`);
