@@ -13,7 +13,6 @@ import re
 import sys
 import time
 import xml.etree.ElementTree as ET
-from urllib.parse import urlparse
 
 SITEMAP_NS = "http://www.sitemaps.org/schemas/sitemap/0.9"
 MAX_DEPTH = 6
@@ -58,11 +57,45 @@ def make_session():
         return session
 
 
-def normalize_robots_url(raw: str) -> str:
+def extract_host(raw: str) -> str:
     raw = raw.strip()
     raw = re.sub(r"^[a-zA-Z][a-zA-Z0-9+.\-]*://", "", raw)
-    host = re.split(r"[/?#]", raw, maxsplit=1)[0].strip().rstrip(".")
-    return f"https://{host}/robots.txt"
+    return re.split(r"[/?#]", raw, maxsplit=1)[0].strip().rstrip(".")
+
+
+# Order to try schemes in when the caller hasn't pinned one down yet. Some sites
+# only listen on plain HTTP (no TLS on 443 at all), which surfaces as a
+# connection-level failure ("Connection refused") rather than an HTTP error —
+# that's the failure mode this fallback exists for.
+SCHEME_ORDER = ("http", "https")
+
+
+def _is_clean_http_failure(err: str) -> bool:
+    """True when `err` came from a real HTTP response (status code or a
+    bot-protection page), meaning switching scheme won't change the outcome."""
+    return err.startswith("HTTP ") or err == "HTML/bot-protection page returned instead of XML"
+
+
+def fetch_with_scheme_fallback(session, host: str, path: str, log):
+    """Tries each scheme in SCHEME_ORDER against host+path, only moving on to
+    the next scheme when the previous one failed at the connection level
+    (refused/timeout/SSL/etc) rather than with a normal HTTP response.
+    Returns (content, base_url, error_message_or_None)."""
+    last_err = None
+    for i, scheme in enumerate(SCHEME_ORDER):
+        url = f"{scheme}://{host}{path}"
+        log(f"[INFO] Trying {url}")
+        content, err = fetch(session, url)
+        if content is not None:
+            return content, f"{scheme}://{host}", None
+
+        last_err = err
+        if _is_clean_http_failure(err):
+            return None, f"{scheme}://{host}", err
+        if i < len(SCHEME_ORDER) - 1:
+            log(f"[WARN] {scheme}:// failed ({err}), retrying over {SCHEME_ORDER[i + 1]}://")
+
+    return None, f"{SCHEME_ORDER[0]}://{host}", last_err
 
 
 def is_html_challenge(content: bytes) -> bool:
@@ -143,12 +176,9 @@ def parse_txt_index(content: bytes):
     return [line.strip() for line in text.splitlines() if line.strip()]
 
 
-def get_sitemaps_from_robots(session, robots_url: str, log):
-    log(f"[INFO] Fetching robots.txt: {robots_url}")
-    parsed = urlparse(robots_url)
-    base_url = f"{parsed.scheme}://{parsed.netloc}"
-
-    content, err = fetch(session, robots_url)
+def get_sitemaps_from_robots(session, host: str, log):
+    log(f"[INFO] Fetching robots.txt for {host}")
+    content, base_url, err = fetch_with_scheme_fallback(session, host, "/robots.txt", log)
     if content is None:
         log(f"[ERROR] Failed to fetch robots.txt: {err}")
         return []
@@ -242,9 +272,9 @@ def main():
     def log(line):
         print(line, flush=True)
 
-    robots_url = normalize_robots_url(args.site_url)
+    host = extract_host(args.site_url)
     session = make_session()
-    parents = get_sitemaps_from_robots(session, robots_url, log)
+    parents = get_sitemaps_from_robots(session, host, log)
 
     if not parents:
         log("[ERROR] No sitemaps found. Nothing to extract.")

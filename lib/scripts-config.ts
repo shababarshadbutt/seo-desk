@@ -21,6 +21,9 @@ export interface ScriptInput {
   options?: { label: string; value: string }[];
   accept?: string;
   folder?: boolean; // enables folder/multi-file upload (webkitdirectory)
+  // For type "select": fetch live options instead of using the static `options` list.
+  // "websites" -> populated from /api/websites (the app's tracked site list).
+  dynamicOptionsSource?: "websites";
 }
 
 export interface ScriptConfig {
@@ -53,9 +56,10 @@ export const scripts: ScriptConfig[] = [
       {
         name: "site_url",
         label: "Website",
-        type: "text",
-        placeholder: "https://example.com or example.com",
-        description: "Just the site's domain, with or without https://. We'll find robots.txt and walk every sitemap automatically.",
+        type: "select",
+        dynamicOptionsSource: "websites",
+        placeholder: "Select a tracked site or type a domain…",
+        description: "Pick a tracked site, or type any domain with or without https://. We'll find robots.txt and walk every sitemap automatically.",
         required: true,
       },
     ],

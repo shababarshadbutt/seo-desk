@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { TerminalOutput, type RunStatus, type RunProgress } from "@/components/terminal-output";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 import { cn } from "@/lib/utils";
 
 const PROGRESS_RE = /^\[PROGRESS\]\s+done=(\d+)\s+queued=(\d+)\s+urls=(\d+)/;
@@ -141,6 +142,30 @@ export function ScriptRunner({ slug }: ScriptRunnerProps) {
   const [sites, setSites] = useState<SiteEntry[]>([newSite()]);
   const [siteRuns, setSiteRuns] = useState<Map<number, SiteRunState>>(new Map());
   const [accountNames, setAccountNames] = useState<string[]>([]);
+
+  // Dynamic "select" options fetched from the app's own data (e.g. tracked websites)
+  const [websiteDomains, setWebsiteDomains] = useState<string[]>([]);
+  const [loadingWebsiteDomains, setLoadingWebsiteDomains] = useState(false);
+  const needsWebsiteOptions = script.inputs.some((i) => i.dynamicOptionsSource === "websites");
+
+  useEffect(() => {
+    if (!needsWebsiteOptions) return;
+    setLoadingWebsiteDomains(true);
+    fetch("/api/websites")
+      .then((r) => (r.ok ? r.json() : []))
+      .then((data: { name: string; url: string }[]) => {
+        const domains = Array.from(
+          new Set(
+            data
+              .map((w) => (w.url || w.name || "").trim())
+              .filter(Boolean)
+          )
+        ).sort((a, b) => a.localeCompare(b));
+        setWebsiteDomains(domains);
+      })
+      .catch(() => {})
+      .finally(() => setLoadingWebsiteDomains(false));
+  }, [needsWebsiteOptions]);
 
   useEffect(() => {
     if (!script.requiresServiceAccount) return;
@@ -371,6 +396,20 @@ export function ScriptRunner({ slug }: ScriptRunnerProps) {
   async function handleStandardSubmit(e: React.FormEvent) {
     e.preventDefault();
 
+    // "select" inputs aren't native <input>/<select> elements, so the browser's
+    // HTML5 required-field validation (relied on for every other input type) never
+    // sees them — check those explicitly before running.
+    for (const input of script.inputs) {
+      if (input.type === "select" && input.required) {
+        const value = fieldValues[input.name];
+        if (typeof value !== "string" || !value.trim()) {
+          setLines([`[ERROR] ${input.label} is required.`]);
+          setStatus("error");
+          return;
+        }
+      }
+    }
+
     setLines([]);
     setStatus("running");
     setOutputFilePath(null);
@@ -600,6 +639,8 @@ export function ScriptRunner({ slug }: ScriptRunnerProps) {
                 value={fieldValues[input.name] ?? ""}
                 onChange={(v) => setField(input.name, v)}
                 disabled={isRunning}
+                dynamicOptions={input.dynamicOptionsSource === "websites" ? websiteDomains : undefined}
+                dynamicOptionsLoading={input.dynamicOptionsSource === "websites" ? loadingWebsiteDomains : false}
               />
             ))}
 
@@ -1095,12 +1136,14 @@ interface ScriptFieldProps {
   value: string | File | FileList;
   onChange: (v: string | File | FileList) => void;
   disabled: boolean;
+  dynamicOptions?: string[];
+  dynamicOptionsLoading?: boolean;
 }
 
-function ScriptField({ input, value, onChange, disabled }: ScriptFieldProps) {
+function ScriptField({ input, value, onChange, disabled, dynamicOptions, dynamicOptionsLoading }: ScriptFieldProps) {
   return (
     <div className="space-y-1.5">
-      <Label htmlFor={input.name}>
+      <Label id={`${input.name}-label`} htmlFor={input.name}>
         {input.label}
         {input.required && <span className="text-destructive ml-1">*</span>}
       </Label>
@@ -1137,6 +1180,21 @@ function ScriptField({ input, value, onChange, disabled }: ScriptFieldProps) {
             </p>
           )}
         </div>
+      ) : input.type === "select" ? (
+        <SearchableSelect
+          id={input.name}
+          label={input.label}
+          externalLabelledBy={`${input.name}-label`}
+          value={typeof value === "string" ? value : ""}
+          onChange={onChange}
+          options={dynamicOptions ?? input.options?.map((o) => o.value) ?? []}
+          loading={dynamicOptionsLoading}
+          allowCustomValue
+          placeholder={input.placeholder ?? "Select…"}
+          loadingPlaceholder="Loading sites…"
+          emptyMessage="No tracked sites — type a domain above"
+          searchPlaceholder="Search or type a domain…"
+        />
       ) : (
         <Input
           id={input.name}

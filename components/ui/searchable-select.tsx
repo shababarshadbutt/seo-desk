@@ -17,6 +17,10 @@ export interface SearchableSelectProps {
   loadingPlaceholder?: string;
   emptyMessage?: string;
   searchPlaceholder?: string;
+  /** When true, lets the user commit whatever they typed even if it doesn't match a listed option. */
+  allowCustomValue?: boolean;
+  /** Id of an external <label> that already labels this field — skips rendering the internal one. */
+  externalLabelledBy?: string;
 }
 
 // A trigger button + searchable popover, used for domain-style pickers.
@@ -34,11 +38,13 @@ export function SearchableSelect({
   loadingPlaceholder = "Loading…",
   emptyMessage = "No results found",
   searchPlaceholder = "Search…",
+  allowCustomValue = false,
+  externalLabelledBy,
 }: SearchableSelectProps) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
   const containerRef = useRef<HTMLDivElement>(null);
-  const labelId = `${id}-label`;
+  const labelId = externalLabelledBy ?? `${id}-label`;
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -51,6 +57,9 @@ export function SearchableSelect({
   }, [open]);
 
   const filtered = options.filter((o) => o.toLowerCase().includes(search.toLowerCase()));
+  const trimmedSearch = search.trim();
+  const hasExactMatch = options.some((o) => o.toLowerCase() === trimmedSearch.toLowerCase());
+  const showCustomOption = allowCustomValue && trimmedSearch.length > 0 && !hasExactMatch;
 
   function select(option: string) {
     onChange(option);
@@ -60,7 +69,7 @@ export function SearchableSelect({
 
   return (
     <div className="space-y-2">
-      <Label id={labelId} htmlFor={id}>{label}</Label>
+      {!externalLabelledBy && <Label id={labelId} htmlFor={id}>{label}</Label>}
       <div ref={containerRef} className="relative">
         <button
           type="button"
@@ -104,7 +113,18 @@ export function SearchableSelect({
               </div>
             </div>
             <div role="listbox" className="max-h-52 overflow-y-auto py-1">
-              {filtered.length === 0 ? (
+              {showCustomOption && (
+                <button
+                  type="button"
+                  role="option"
+                  aria-selected={false}
+                  onClick={() => select(trimmedSearch)}
+                  className="w-full flex items-center px-3 py-2 text-sm hover:bg-muted/50 transition-colors text-left truncate border-b border-border"
+                >
+                  Use &ldquo;{trimmedSearch}&rdquo;
+                </button>
+              )}
+              {filtered.length === 0 && !showCustomOption ? (
                 <p className="text-xs text-muted-foreground text-center py-4">{emptyMessage}</p>
               ) : (
                 filtered.map((option) => (
