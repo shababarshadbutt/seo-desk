@@ -98,6 +98,37 @@ def fetch_with_scheme_fallback(session, host: str, path: str, log):
     return None, f"{SCHEME_ORDER[0]}://{host}", last_err
 
 
+def _swap_scheme(url: str):
+    if url.startswith("https://"):
+        return "http://" + url[len("https://"):]
+    if url.startswith("http://"):
+        return "https://" + url[len("http://"):]
+    return None
+
+
+def fetch_resilient(session, url: str, log):
+    """Fetches an already-absolute URL (e.g. from a robots.txt `Sitemap:`
+    directive or a <loc> entry). Sites sometimes advertise the wrong scheme
+    for themselves (e.g. an https:// sitemap URL on a host that only answers
+    on port 80) — on a connection-level failure, retry once with the scheme
+    swapped. Returns (content, resolved_url, error_message_or_None)."""
+    content, err = fetch(session, url)
+    if content is not None:
+        return content, url, None
+    if _is_clean_http_failure(err):
+        return None, url, err
+
+    alt_url = _swap_scheme(url)
+    if not alt_url:
+        return None, url, err
+
+    log(f"[WARN] {url} failed ({err}), retrying over {alt_url.split('://', 1)[0]}://")
+    content, err2 = fetch(session, alt_url)
+    if content is not None:
+        return content, alt_url, None
+    return None, alt_url, err2
+
+
 def is_html_challenge(content: bytes) -> bool:
     stripped = content.strip()
     return stripped.startswith(b"<!DOCTYPE") or stripped.startswith(b"<html")
@@ -196,10 +227,10 @@ def get_sitemaps_from_robots(session, host: str, log):
     log("[WARN] No Sitemap: directive found in robots.txt. Trying common paths...")
     for path in COMMON_SITEMAP_PATHS:
         candidate = base_url + path
-        c, e = fetch(session, candidate)
+        c, resolved, e = fetch_resilient(session, candidate, log)
         if c is not None:
-            log(f"[INFO] Found sitemap at: {candidate}")
-            sitemap_urls.append(candidate)
+            log(f"[INFO] Found sitemap at: {resolved}")
+            sitemap_urls.append(resolved)
             break
         log(f"[INFO] {candidate} -> {e}")
 
@@ -213,6 +244,16 @@ def get_sitemaps_from_robots(session, host: str, log):
 
 def worker_loop(work_q, results_q, visited, done_counter, counter_lock, stop_event):
     session = make_session()
+
+    def log(msg):
+        # fetch_resilient's messages already carry a "[LEVEL] " prefix; route
+        # them to the matching queue kind so drain() doesn't double-tag them.
+        if msg.startswith("[WARN] "):
+            results_q.put(("warn", msg[len("[WARN] "):]))
+        elif msg.startswith("[INFO] "):
+            results_q.put(("info", msg[len("[INFO] "):]))
+        else:
+            results_q.put(("info", msg))
 
     while not stop_event.is_set():
         try:
@@ -230,12 +271,12 @@ def worker_loop(work_q, results_q, visited, done_counter, counter_lock, stop_eve
                 results_q.put(("warn", f"Max depth exceeded, skipping: {url}"))
                 continue
 
-            content, err = fetch(session, url)
+            content, resolved_url, err = fetch_resilient(session, url, log)
             if content is None:
                 results_q.put(("warn", f"Failed to fetch {url}: {err}"))
                 continue
 
-            if url.lower().endswith(".txt"):
+            if resolved_url.lower().endswith(".txt"):
                 children = parse_txt_index(content)
                 kind = "index"
             else:
@@ -244,13 +285,13 @@ def worker_loop(work_q, results_q, visited, done_counter, counter_lock, stop_eve
             if kind == "index":
                 for child in children:
                     work_q.put((child, depth + 1))
-                results_q.put(("info", f"[index] {url} -> {len(children)} child sitemap(s)"))
+                results_q.put(("info", f"[index] {resolved_url} -> {len(children)} child sitemap(s)"))
             elif kind == "urlset":
                 if children:
                     results_q.put(("urls", children))
-                results_q.put(("info", f"[sitemap] {url} -> {len(children)} URL(s)"))
+                results_q.put(("info", f"[sitemap] {resolved_url} -> {len(children)} URL(s)"))
             else:
-                results_q.put(("warn", f"Could not classify sitemap content: {url}"))
+                results_q.put(("warn", f"Could not classify sitemap content: {resolved_url}"))
         finally:
             with counter_lock:
                 done_counter.value += 1
