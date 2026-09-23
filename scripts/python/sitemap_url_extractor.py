@@ -14,6 +14,8 @@ import sys
 import time
 import xml.etree.ElementTree as ET
 
+import requests
+
 SITEMAP_NS = "http://www.sitemaps.org/schemas/sitemap/0.9"
 MAX_DEPTH = 6
 FETCH_TIMEOUT = 20
@@ -106,14 +108,32 @@ def _swap_scheme(url: str):
     return None
 
 
-def fetch_resilient(session, url: str, log):
+def _url_host(url: str):
+    return url.split("://", 1)[-1].split("/", 1)[0]
+
+
+def fetch_resilient(session, url: str, log, scheme_cache=None):
     """Fetches an already-absolute URL (e.g. from a robots.txt `Sitemap:`
     directive or a <loc> entry). Sites sometimes advertise the wrong scheme
     for themselves (e.g. an https:// sitemap URL on a host that only answers
     on port 80) — on a connection-level failure, retry once with the scheme
-    swapped. Returns (content, resolved_url, error_message_or_None)."""
+    swapped. Returns (content, resolved_url, error_message_or_None).
+
+    `scheme_cache` (a shared dict, host -> working scheme) lets every fetch
+    for the same host benefit from what earlier ones already learned, instead
+    of every single file on a broken-scheme site (there can be thousands)
+    separately eating a doomed connection-refused attempt first."""
+    host = _url_host(url)
+    scheme = url.split("://", 1)[0]
+    known_good = scheme_cache.get(host) if scheme_cache is not None else None
+    if known_good and known_good != scheme:
+        url = _swap_scheme(url) or url
+        scheme = known_good
+
     content, err = fetch(session, url)
     if content is not None:
+        if scheme_cache is not None:
+            scheme_cache[host] = scheme
         return content, url, None
     if _is_clean_http_failure(err):
         return None, url, err
@@ -121,10 +141,13 @@ def fetch_resilient(session, url: str, log):
     alt_url = _swap_scheme(url)
     if not alt_url:
         return None, url, err
+    alt_scheme = alt_url.split("://", 1)[0]
 
-    log(f"[WARN] {url} failed ({err}), retrying over {alt_url.split('://', 1)[0]}://")
+    log(f"[WARN] {url} failed ({err}), retrying over {alt_scheme}://")
     content, err2 = fetch(session, alt_url)
     if content is not None:
+        if scheme_cache is not None:
+            scheme_cache[host] = alt_scheme
         return content, alt_url, None
     return None, alt_url, err2
 
@@ -159,6 +182,20 @@ def fetch(session, url: str):
             if is_html_challenge(content):
                 return None, "HTML/bot-protection page returned instead of XML"
             return content, None
+        except requests.exceptions.Timeout as e:
+            # A slow server might just need another try.
+            last_err = str(e)
+            if attempt < FETCH_RETRIES:
+                time.sleep(RETRY_BACKOFF * (attempt + 1))
+                continue
+        except requests.exceptions.ConnectionError as e:
+            # Refused/reset/DNS/TLS-handshake failure — the port is
+            # definitively not answering on this scheme, so retrying the
+            # identical request won't help. Bail immediately instead of
+            # burning FETCH_RETRIES more attempts with backoff sleeps; the
+            # caller's scheme fallback (fetch_resilient) is what can
+            # actually recover from this.
+            return None, str(e)
         except Exception as e:
             last_err = str(e)
             if attempt < FETCH_RETRIES:
@@ -208,11 +245,13 @@ def parse_txt_index(content: bytes):
 
 
 def get_sitemaps_from_robots(session, host: str, log):
+    """Returns (sitemap_urls, working_scheme_or_None)."""
     log(f"[INFO] Fetching robots.txt for {host}")
     content, base_url, err = fetch_with_scheme_fallback(session, host, "/robots.txt", log)
+    working_scheme = base_url.split("://", 1)[0] if content is not None else None
     if content is None:
         log(f"[ERROR] Failed to fetch robots.txt: {err}")
-        return []
+        return [], None
 
     sitemap_urls = []
     for line in content.decode("utf-8", "ignore").splitlines():
@@ -222,7 +261,7 @@ def get_sitemaps_from_robots(session, host: str, log):
 
     if sitemap_urls:
         log(f"[INFO] Found {len(sitemap_urls)} parent sitemap(s) in robots.txt")
-        return sitemap_urls
+        return sitemap_urls, working_scheme
 
     log("[WARN] No Sitemap: directive found in robots.txt. Trying common paths...")
     for path in COMMON_SITEMAP_PATHS:
@@ -231,18 +270,19 @@ def get_sitemaps_from_robots(session, host: str, log):
         if c is not None:
             log(f"[INFO] Found sitemap at: {resolved}")
             sitemap_urls.append(resolved)
+            working_scheme = resolved.split("://", 1)[0]
             break
         log(f"[INFO] {candidate} -> {e}")
 
     if not sitemap_urls:
         log(f"[WARN] No sitemaps found via robots.txt or common paths for {base_url}")
 
-    return sitemap_urls
+    return sitemap_urls, working_scheme
 
 
 # ─── Worker process ──────────────────────────────────────────────────────────
 
-def worker_loop(work_q, results_q, visited, done_counter, counter_lock, stop_event):
+def worker_loop(work_q, results_q, visited, scheme_cache, done_counter, counter_lock, stop_event):
     session = make_session()
 
     def log(msg):
@@ -271,7 +311,7 @@ def worker_loop(work_q, results_q, visited, done_counter, counter_lock, stop_eve
                 results_q.put(("warn", f"Max depth exceeded, skipping: {url}"))
                 continue
 
-            content, resolved_url, err = fetch_resilient(session, url, log)
+            content, resolved_url, err = fetch_resilient(session, url, log, scheme_cache)
             if content is None:
                 results_q.put(("warn", f"Failed to fetch {url}: {err}"))
                 continue
@@ -315,7 +355,7 @@ def main():
 
     host = extract_host(args.site_url)
     session = make_session()
-    parents = get_sitemaps_from_robots(session, host, log)
+    parents, working_scheme = get_sitemaps_from_robots(session, host, log)
 
     if not parents:
         log("[ERROR] No sitemaps found. Nothing to extract.")
@@ -330,6 +370,9 @@ def main():
     work_q = manager.JoinableQueue()
     results_q = manager.Queue()
     visited = manager.dict()
+    scheme_cache = manager.dict()
+    if working_scheme:
+        scheme_cache[host] = working_scheme
     done_counter = manager.Value("i", 0)
     urls_counter = manager.Value("i", 0)
     counter_lock = manager.Lock()
@@ -341,7 +384,7 @@ def main():
     workers = [
         multiprocessing.Process(
             target=worker_loop,
-            args=(work_q, results_q, visited, done_counter, counter_lock, stop_event),
+            args=(work_q, results_q, visited, scheme_cache, done_counter, counter_lock, stop_event),
             daemon=True,
         )
         for _ in range(max(1, args.max_workers))
