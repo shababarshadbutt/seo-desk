@@ -77,14 +77,22 @@ export function createSitemapParser(fileCount: number, onPoolAbandoned?: () => v
         });
         consecutiveFailures = 0;
         return result;
-      } catch {
+      } catch (err) {
         consecutiveFailures++;
         if (consecutiveFailures >= FAILURE_THRESHOLD && pool === activePool) {
           pool = null;
           activePool.destroy().catch(() => {});
           onPoolAbandoned?.();
+          // Pool is being abandoned for the rest of the run — still parse
+          // this file in-process rather than losing it too.
+          return parseSitemapBuffer(input);
         }
-        // Fall through to in-process parsing below.
+        // Breaker hasn't tripped — the pool may still be healthy for other
+        // files. Don't duplicate this file's CPU-bound parse on the main
+        // thread: that's what was blocking the event loop (and the SSE
+        // heartbeat) under load. Let the caller's per-file error handling
+        // treat this one file as failed instead.
+        throw err;
       }
     }
     return parseSitemapBuffer(input);
