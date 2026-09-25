@@ -20,6 +20,7 @@ export async function GET() {
     ga4Properties: settings?.ga4Properties ?? [],
     sessionTimeoutMinutes: settings?.sessionTimeoutMinutes ?? 60,
     logRetentionDays: settings?.logRetentionDays ?? 15,
+    dailyReportPopupEnabled: settings?.dailyReportPopupEnabled ?? true,
   });
 }
 
@@ -52,6 +53,13 @@ export async function PATCH(req: Request) {
     update.logRetentionDays = days;
   }
 
+  if (body.dailyReportPopupEnabled !== undefined) {
+    if (typeof body.dailyReportPopupEnabled !== "boolean") {
+      return Response.json({ error: "dailyReportPopupEnabled must be a boolean." }, { status: 400 });
+    }
+    update.dailyReportPopupEnabled = body.dailyReportPopupEnabled;
+  }
+
   if (Object.keys(update).length === 0) {
     return Response.json({ error: "Nothing to update." }, { status: 400 });
   }
@@ -70,5 +78,6 @@ export async function PATCH(req: Request) {
     ga4Properties: settings?.ga4Properties ?? [],
     sessionTimeoutMinutes: settings?.sessionTimeoutMinutes ?? 60,
     logRetentionDays: settings?.logRetentionDays ?? 15,
+    dailyReportPopupEnabled: settings?.dailyReportPopupEnabled ?? true,
   });
 }

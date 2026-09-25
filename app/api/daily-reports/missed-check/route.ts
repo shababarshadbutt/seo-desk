@@ -1,6 +1,6 @@
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { connectDB, DailyReport, User } from "@/lib/mongodb";
+import { connectDB, DailyReport, Settings, User } from "@/lib/mongodb";
 
 export const dynamic = "force-dynamic";
 
@@ -45,6 +45,13 @@ export async function GET() {
     return Response.json({ missedDate: null });
   }
 
+  await connectDB();
+
+  const settingsDoc = await Settings.findOne({ singleton: true }).select("dailyReportPopupEnabled").lean();
+  if (settingsDoc?.dailyReportPopupEnabled === false) {
+    return Response.json({ missedDate: null });
+  }
+
   const today = todayPKT();
   const todayObj = toDateObj(today);
 
@@ -52,8 +59,6 @@ export async function GET() {
   const yesterday = new Date(todayObj);
   yesterday.setDate(yesterday.getDate() - 1);
   const yesterdayStr = toDateStr(yesterday);
-
-  await connectDB();
 
   // Start from whichever is later: April 22 2026 (global cutoff) or user's account creation date
   const GLOBAL_CUTOFF = "2026-04-22";

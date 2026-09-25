@@ -46,6 +46,7 @@ export default async function SettingsPage() {
         ga4Properties={settings?.ga4Properties ?? []}
         sessionTimeoutMinutes={settings?.sessionTimeoutMinutes ?? 60}
         logRetentionDays={settings?.logRetentionDays ?? 15}
+        dailyReportPopupEnabled={settings?.dailyReportPopupEnabled ?? true}
         users={users}
         groups={groups}
         userMap={userMap}

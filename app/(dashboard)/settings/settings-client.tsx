@@ -28,6 +28,7 @@ interface SettingsClientProps {
   ga4Properties: Ga4Property[];
   sessionTimeoutMinutes: number;
   logRetentionDays: number;
+  dailyReportPopupEnabled: boolean;
   users: UserOption[];
   groups: GroupData[];
   userMap: Record<string, UserOption>;
@@ -114,6 +115,7 @@ export function SettingsClient(props: SettingsClientProps) {
         <SecurityRetentionCard
           initialSessionTimeoutMinutes={props.sessionTimeoutMinutes}
           initialLogRetentionDays={props.logRetentionDays}
+          initialDailyReportPopupEnabled={props.dailyReportPopupEnabled}
         />
       )}
 
@@ -349,18 +351,21 @@ const LOG_RETENTION_PRESETS = [
 function SecurityRetentionCard({
   initialSessionTimeoutMinutes,
   initialLogRetentionDays,
+  initialDailyReportPopupEnabled,
 }: {
   initialSessionTimeoutMinutes: number;
   initialLogRetentionDays: number;
+  initialDailyReportPopupEnabled: boolean;
 }) {
   const router = useRouter();
   const [hours, setHours] = useState(String(initialSessionTimeoutMinutes / 60));
   const [retentionDays, setRetentionDays] = useState(initialLogRetentionDays);
+  const [popupEnabled, setPopupEnabled] = useState(initialDailyReportPopupEnabled);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
-  async function save(update: Record<string, number>) {
+  async function save(update: Record<string, number | boolean>) {
     setError(""); setSuccess(""); setSaving(true);
 
     const res = await fetch("/api/settings", {
@@ -393,6 +398,11 @@ function SecurityRetentionCard({
   function handleRetentionChange(value: number) {
     setRetentionDays(value);
     save({ logRetentionDays: value });
+  }
+
+  function handlePopupToggle(value: boolean) {
+    setPopupEnabled(value);
+    save({ dailyReportPopupEnabled: value });
   }
 
   return (
@@ -439,6 +449,23 @@ function SecurityRetentionCard({
               <option key={p.value} value={p.value}>{p.label}</option>
             ))}
           </select>
+        </div>
+
+        <div className="flex items-center justify-between gap-4 pt-3 border-t sm:col-span-2">
+          <div>
+            <Label htmlFor="daily-report-popup">Missing Daily Report popup</Label>
+            <p className="text-xs text-muted-foreground">
+              When enabled, users who haven&apos;t submitted a daily report are blocked with a mandatory popup until they do (or mark leave/holiday). Super-admins are always exempt.
+            </p>
+          </div>
+          <input
+            id="daily-report-popup"
+            type="checkbox"
+            checked={popupEnabled}
+            onChange={(e) => handlePopupToggle(e.target.checked)}
+            disabled={saving}
+            className="h-5 w-9 shrink-0 cursor-pointer appearance-none rounded-full bg-muted transition-colors checked:bg-primary relative before:absolute before:left-0.5 before:top-0.5 before:h-4 before:w-4 before:rounded-full before:bg-background before:shadow before:transition-transform checked:before:translate-x-4"
+          />
         </div>
       </div>
 

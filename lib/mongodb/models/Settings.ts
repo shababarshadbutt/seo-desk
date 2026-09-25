@@ -45,6 +45,7 @@ export interface ISettings extends Document {
   ga4Properties: IGa4Property[];
   sessionTimeoutMinutes: number;
   logRetentionDays: number; // 0 = unlimited (never prune)
+  dailyReportPopupEnabled: boolean; // gates the mandatory "Missing Daily Report" popup for non-super-admins
   sftpConfig: ISftpConfig;
   s3Config: IS3Config;
   updatedAt: Date;
@@ -105,6 +106,7 @@ const SettingsSchema = new Schema<ISettings>(
     ga4Properties: { type: [Ga4PropertySchema], default: [] },
     sessionTimeoutMinutes: { type: Number, default: 60, min: 1 },
     logRetentionDays: { type: Number, default: 15, min: 0 },
+    dailyReportPopupEnabled: { type: Boolean, default: true },
     sftpConfig: { type: SftpConfigSchema, default: () => ({}) },
     s3Config: { type: S3ConfigSchema, default: () => ({}) },
   },
